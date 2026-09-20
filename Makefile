@@ -106,8 +106,14 @@ package: ## Build the submission zip from tracked files only
 	@git archive --format=zip --prefix=hivemind-greeter/ -o hivemind-greeter.zip HEAD
 	@echo "wrote hivemind-greeter.zip ($$(du -h hivemind-greeter.zip | cut -f1), $$(unzip -l hivemind-greeter.zip | tail -1 | awk '{print $$2}') files)"
 	@echo "verifying no state, provider cache or credentials leaked:"
-	@! unzip -l hivemind-greeter.zip | grep -qE 'tfstate|\.terraform/|coverage\.out|\.env$$|credentials' \
-	  && echo "  clean" || { echo "  LEAK DETECTED"; exit 1; }
+	@# Anchored deliberately. A loose \.env$$ also matches k8s/base/greeter.env,
+	@# which is a ConfigMap input and belongs in the archive; a check that cries
+	@# wolf gets disabled, so it has to be exact.
+	@if unzip -Z1 hivemind-greeter.zip | grep -nE '(^|/)\.terraform/|\.tfstate($$|\.)|(^|/)\.env($$|\.)|(^|/)credentials$$|coverage\.out$$|\.pem$$|\.kubeconfig$$|(^|/)\.DS_Store$$'; then \
+	  echo "  LEAK DETECTED — the above must not ship"; exit 1; \
+	else \
+	  echo "  clean: no state, provider cache, credentials or key material"; \
+	fi
 
 .PHONY: destroy
 destroy: ## Tear down in the correct order (workload first, then infrastructure)
