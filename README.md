@@ -139,18 +139,15 @@ hop. The Go server sets explicit read, write and idle timeouts; Go's defaults
 are unlimited, which is a slow-client exhaustion vector. The sub-3 MiB image
 keeps pull time negligible during scale-out.
 
-Autoscaling was measured, not assumed: under load the HPA scaled **3 → 7
-replicas** on real `metrics-server` metrics, held the zone-spread constraint at
-2/2/3, registered every new pod in the ALB target group, and scaled back to 3
-afterwards.
+The HPA scales 3–12 on CPU against `metrics-server`. Measured behaviour under
+load is in [Verified](#verified).
 
 ### Reliability
 
 Replicas spread across three AZs under a **hard** `topologySpreadConstraint`
-(`DoNotSchedule`), scoped by `matchLabelKeys: [pod-template-hash]`. That last
-part is load-bearing: without it the constraint counts both ReplicaSets during a
-surge rollout and the surviving set can land 2/1/0 across three zones. That is
-not hypothetical — it happened on this cluster before the fix.
+(`DoNotSchedule`), scoped by `matchLabelKeys: [pod-template-hash]` so the count
+covers one revision rather than both during a rollout — see
+[Verified](#verified) for why that scoping is load-bearing.
 
 Zero-downtime deploys rest on a chain that must hold end to end: ALB pod
 readiness gate → `maxUnavailable: 0` → 10s `preStop` sleep → 20s ALB
@@ -238,9 +235,8 @@ region, so an AZ failure is survived and a region failure is not.
 
 Things that will bite someone who did not write this.
 
-- **Teardown order is not optional.** The ALB is created by the controller, not
-  by Terraform. Destroy infrastructure first and its ENIs strand in the subnets
-  and hang VPC deletion. Use `make destroy`.
+- **Teardown order is not optional** — see [Tearing down](#tearing-down). Use
+  `make destroy`.
 - **`HELLO_TAG` must stay tied to the image tag.** CD writes both from the same
   value. Setting it by hand for a quick rollout makes the service advertise a
   release that does not exist — the tag stops meaning anything.
@@ -351,9 +347,10 @@ reproduces the static half; CI runs it on every push.
 - **Teardown:** deleting the Ingress released the ALB and its ENIs, which is the
   step that makes `terraform destroy` terminate rather than hang.
 
-Static gates, all clean: Go tests under `-race`, `golangci-lint`,
-`terraform validate` and `tflint`, `kubeconform -strict` against 1.36, `trivy`
-over Terraform, manifests, Dockerfile and image, and `actionlint`.
+Static gates, all clean: Go tests under `-race` with a coverage floor,
+`golangci-lint`, `govulncheck`, `terraform validate` / `test` / `tflint`,
+`kubeconform -strict`, `trivy` over Terraform, manifests, Dockerfile and image,
+and `actionlint`.
 
 **The finding worth the space:** pods landed **2/1/0 across AZs** despite a hard
 spread constraint, because it counts both ReplicaSets during a surge rollout.
