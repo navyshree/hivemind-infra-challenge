@@ -7,6 +7,24 @@ resource "aws_ecr_repository" "greeter" {
   # rewrite vector.
   image_tag_mutability = "IMMUTABLE"
 
+  # Note what this does and does not buy you.
+  #
+  # ECR BASIC scanning reads OS packages only. This image is FROM scratch, so
+  # it has no OS and no package manager, and a scan against it fails outright:
+  #   UnsupportedImageError: The operating system and/or package manager are
+  #   not supported.
+  # (Verified against this registry, not inferred.) Leaving the flag on with
+  # BASIC scanning is therefore worse than leaving it off — the console reports
+  # scanning as enabled and no finding is ever produced.
+  #
+  # It is kept true because it becomes meaningful the moment the registry is
+  # switched to ENHANCED scanning (Amazon Inspector), which does read
+  # language-level dependencies including Go binaries. See
+  # var.enable_enhanced_scanning below.
+  #
+  # Until then the real control is Trivy, which scans the Go binary's embedded
+  # module list and gates CI on HIGH/CRITICAL. The gap Trivy cannot cover is
+  # CVEs disclosed *after* build time; only registry rescanning catches those.
   image_scanning_configuration {
     scan_on_push = true
   }
@@ -22,6 +40,30 @@ resource "aws_ecr_repository" "greeter" {
   force_delete = true
 
   tags = local.tags
+}
+
+# Registry-wide, and billable, so it is opt-in rather than on by default.
+#
+# Enhanced scanning is the correct answer for a distroless or scratch image:
+# Inspector inspects language package manifests and Go binaries, where BASIC
+# scanning can only see OS packages. It also rescans continuously, which is the
+# one thing a build-time Trivy gate structurally cannot do.
+#
+# Scope: this configures the whole registry for the account, not just this
+# repository, which is why it is not enabled by default in someone else's
+# account. Cost is roughly USD 0.09 per image scanned per month plus rescans.
+resource "aws_ecr_registry_scanning_configuration" "this" {
+  count = var.enable_enhanced_scanning ? 1 : 0
+
+  scan_type = "ENHANCED"
+
+  rule {
+    scan_frequency = "CONTINUOUS_SCAN"
+    repository_filter {
+      filter      = "*"
+      filter_type = "WILDCARD"
+    }
+  }
 }
 
 resource "aws_ecr_lifecycle_policy" "greeter" {

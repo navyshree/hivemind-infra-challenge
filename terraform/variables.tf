@@ -154,6 +154,21 @@ variable "hello_tag" {
   default     = "local-dev"
 }
 
+variable "enable_enhanced_scanning" {
+  description = <<-EOT
+    Switch the registry to ECR Enhanced scanning (Amazon Inspector).
+
+    Off by default because it is a registry-wide, billable change rather than a
+    per-repository one — roughly USD 0.09 per image per month plus rescans.
+
+    Turn it on for any real deployment of this service. BASIC scanning cannot
+    read a scratch image at all (no OS, no package manager), so without this
+    the repository's scan_on_push produces nothing.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "ecr_image_retention_count" {
   description = "Number of tagged images to retain in ECR before lifecycle expiry."
   type        = number

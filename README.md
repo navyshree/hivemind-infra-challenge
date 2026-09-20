@@ -269,7 +269,17 @@ fallback with correct headers and 404s.
    it means the very first rollout of a new service has a weaker guarantee than
    every one after.
 
-**Not verified:** the CI/CD pipeline has never executed (it is written and
-linted, but no repository exists yet, so the OIDC role was not created); no real
-AZ failure was simulated — one pod per AZ is confirmed, surviving the loss of an
-AZ is inferred from it.
+**Not verified:** the CI/CD workflows are written and linted but have not been
+executed end to end, so the OIDC deploy role (created by setting
+`github_repository`) has not been exercised against a live run. No real AZ
+failure was simulated — one pod per AZ is confirmed; surviving the loss of an AZ
+is inferred from that.
+
+### TODO
+
+- Run the pipeline end to end and attach a green CI run plus one CD deploy.
+- Switch the registry to Enhanced scanning (`enable_enhanced_scanning = true`);
+  BASIC scanning cannot read a scratch image.
+- Terminate a node, and ideally cordon an AZ, to turn the AZ-tolerance claim
+  from inference into evidence.
+- Add TLS once a domain and ACM certificate exist.
