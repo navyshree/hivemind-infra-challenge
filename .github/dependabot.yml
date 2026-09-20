@@ -1,0 +1,51 @@
+version: 2
+
+# Dependency updates.
+#
+# Pinning without an update mechanism is how a repository ends up on a two-year
+# old action or an EKS module that no longer supports the current Kubernetes
+# version. Everything here is pinned deliberately — this is the other half of
+# that decision.
+#
+# CI gates every one of these PRs: Go tests, govulncheck, Trivy, terraform
+# validate/test/tflint and kubeconform all run before a bump can merge, so an
+# update that breaks something fails visibly rather than landing quietly.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    groups:
+      # One PR for the routine patch noise, individual PRs for majors so a
+      # breaking change gets read rather than rubber-stamped.
+      actions-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: gomod
+    directory: /app
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+
+  - package-ecosystem: docker
+    directory: /app
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+
+  - package-ecosystem: terraform
+    directory: /terraform
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "feat(infra)"
+    groups:
+      terraform-minor:
+        update-types: [minor, patch]

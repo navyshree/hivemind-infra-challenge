@@ -70,6 +70,33 @@ jobs:
           awk -v t="$total" -v m="$COVERAGE_MIN" \
             'BEGIN { if (t+0 < m+0) { printf "::error::coverage %.1f%% is below floor %s%%\n", t, m; exit 1 } }'
 
+      - name: Publish coverage to the run summary
+        # The headline number is misleading on its own: main() cannot be unit
+        # tested and is ~20% of statements, so it drags the total well below
+        # what the tested code actually achieves. Showing the per-function
+        # breakdown puts the number in context instead of leaving a reader to
+        # assume the handlers are thinly covered.
+        if: always()
+        run: |
+          {
+            echo "### Go coverage"
+            echo
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+            echo
+            echo "_\`main()\` is not unit tested — it is covered by the container smoke test below._"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Scan dependencies for known vulnerabilities
+        # Go's official scanner. It is call-graph aware, so unlike a generic
+        # binary scan it only reports vulnerabilities on code paths this
+        # programme actually reaches — far fewer false positives, and it knows
+        # about stdlib advisories that image scanners miss entirely.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
       - name: Install golangci-lint
         run: |
           curl -sSfL -o /tmp/glci.tar.gz \

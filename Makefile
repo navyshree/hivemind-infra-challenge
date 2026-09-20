@@ -25,6 +25,9 @@ lint: ## Run gofmt, go vet and golangci-lint
 	cd app && test -z "$$(gofmt -l .)" || { echo "not gofmt-clean:"; gofmt -l app; exit 1; }
 	cd app && go vet ./...
 	cd app && golangci-lint run ./...
+	@# Go's official vulnerability scanner; call-graph aware, so it only flags
+	@# advisories on code paths actually reachable from this binary.
+	cd app && go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 .PHONY: build
 build: ## Build the container image locally
