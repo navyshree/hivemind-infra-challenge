@@ -72,8 +72,9 @@ and keep the PDB in the form that stays safe under consolidation.
   interruption queue, and a node-level termination budget that fits inside the
   40s `terminationGracePeriodSeconds` this deployment already uses.
 - For any future single-replica workload in this cluster, the eviction problem
-  is real and the PDB is not the answer. A surge-before-evict helper such as
-  [evict-to-rollout][etr] is.
+  is real and a PDB is not the answer — `minAvailable: 1` on one replica blocks
+  the eviction outright. That case needs a surge-before-evict controller, or a
+  second replica.
 
 ## Code location
 
@@ -103,4 +104,3 @@ Any one of:
 [k1599]: https://github.com/kubernetes-sigs/karpenter/issues/1599
 [k2600]: https://github.com/kubernetes-sigs/karpenter/issues/2600
 [k90977]: https://github.com/kubernetes/kubernetes/issues/90977
-[etr]: https://github.com/HivemindTechnologies/evict-to-rollout
