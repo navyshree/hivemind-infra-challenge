@@ -41,6 +41,8 @@ validate: ## Validate Terraform and Kubernetes manifests
 	cd terraform && terraform fmt -check -recursive -diff
 	cd terraform && terraform init -backend=false -input=false >/dev/null
 	cd terraform && terraform validate
+	@# Mocked providers, so this needs no credentials and creates nothing.
+	cd terraform && terraform test
 	cd terraform && tflint --init --config=$(CURDIR)/.tflint.hcl >/dev/null
 	cd terraform && tflint --config=$(CURDIR)/.tflint.hcl --format compact
 	kubectl kustomize k8s/base | kubeconform -strict -summary -kubernetes-version $(K8S_VERSION)

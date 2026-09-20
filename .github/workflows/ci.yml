@@ -211,6 +211,13 @@ jobs:
       - name: Validate
         run: terraform validate -no-color
 
+      - name: Test
+        # Native Terraform tests against mocked providers: no AWS credentials,
+        # no resources created. These assert the variable validations actually
+        # reject bad input — a validation nobody tests is a comment, and its
+        # failure mode is silently accepting what it was meant to forbid.
+        run: terraform test -no-color
+
       - name: Install TFLint
         run: |
           curl -sSfL -o /tmp/tflint.zip \
