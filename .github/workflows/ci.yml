@@ -1,0 +1,238 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Read-only by default. The deploy workflow widens this for itself only.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Tool versions are pinned rather than floating. Installing from a pinned
+  # release tarball is preferred over a third-party action: fewer actions with
+  # access to the job token, and an exact, auditable version.
+  GOLANGCI_LINT_VERSION: "2.13.2"
+  TRIVY_VERSION: "0.74.0"
+  TFLINT_VERSION: "v0.64.0"
+  KUBECONFORM_VERSION: "v0.8.0"
+  # Schema version the manifests are validated against; keep in step with
+  # var.kubernetes_version in terraform/variables.tf.
+  KUBERNETES_VERSION: "1.36.0"
+  # Coverage floor. Deliberately modest: main() cannot be unit tested and is
+  # ~20% of statements. It is covered instead by the container smoke test in
+  # the "image" job below, which exercises startup, routing and SIGTERM drain.
+  COVERAGE_MIN: "40"
+
+jobs:
+  app:
+    name: Go build, test, lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: app/go.mod
+          # The service has no third-party dependencies, so there is no module
+          # cache worth restoring and no go.sum for the cache key.
+          cache: false
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test with race detector
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Enforce coverage floor
+        run: |
+          go tool cover -func=coverage.out
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')"
+          echo "total coverage: ${total}% (floor ${COVERAGE_MIN}%)"
+          awk -v t="$total" -v m="$COVERAGE_MIN" \
+            'BEGIN { if (t+0 < m+0) { printf "::error::coverage %.1f%% is below floor %s%%\n", t, m; exit 1 } }'
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL -o /tmp/glci.tar.gz \
+            "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+          tar -xzf /tmp/glci.tar.gz -C /tmp
+          sudo install "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint" /usr/local/bin/
+
+      - name: Lint
+        run: golangci-lint run ./...
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage
+          path: app/coverage.out
+          retention-days: 7
+
+  image:
+    name: Image build, scan, smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./app
+          push: false
+          load: true
+          tags: greeter:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Trivy
+        run: |
+          curl -sSfL -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install /tmp/trivy /usr/local/bin/
+
+      - name: Scan image for vulnerabilities
+        run: trivy image --severity HIGH,CRITICAL --exit-code 1 --no-progress greeter:ci
+
+      - name: Scan Dockerfile
+        run: trivy config --config trivy.yaml app/Dockerfile
+
+      - name: Smoke test the running container
+        # Covers what unit tests cannot: process startup, real HTTP serving,
+        # and a clean SIGTERM drain.
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke -p 18080:8080 \
+            -e "HELLO_TAG=ci-${GITHUB_SHA::7}" --hostname smoke-pod greeter:ci
+
+          for i in $(seq 1 30); do
+            if curl -sf --max-time 2 http://127.0.0.1:18080/healthz >/dev/null; then break; fi
+            if [ "$i" -eq 30 ]; then echo "::error::container never became healthy"; docker logs smoke; exit 1; fi
+            sleep 1
+          done
+
+          named="$(curl -sf --max-time 5 'http://127.0.0.1:18080/?name=Ada')"
+          echo "named greeting:    $named"
+          case "$named" in
+            "Hello, Ada! I'm smoke-pod (tag: ci-${GITHUB_SHA::7})") ;;
+            *) echo "::error::unexpected greeting: $named"; exit 1 ;;
+          esac
+
+          anon="$(curl -sf --max-time 5 http://127.0.0.1:18080/)"
+          echo "fallback greeting: $anon"
+          case "$anon" in
+            "Hello, "*) ;;
+            *) echo "::error::unexpected fallback: $anon"; exit 1 ;;
+          esac
+
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:18080/nope)"
+          [ "$code" = "404" ] || { echo "::error::expected 404, got $code"; exit 1; }
+
+          # A clean drain must finish well inside the 30s docker stop timeout.
+          start=$(date +%s)
+          docker stop --timeout 30 smoke >/dev/null
+          elapsed=$(( $(date +%s) - start ))
+          rc="$(docker inspect smoke --format '{{.State.ExitCode}}')"
+          echo "shutdown: ${elapsed}s, exit ${rc}"
+          [ "$rc" = "0" ] || { echo "::error::unclean shutdown (exit $rc)"; exit 1; }
+          [ "$elapsed" -lt 15 ] || { echo "::error::SIGTERM ignored, took ${elapsed}s"; exit 1; }
+
+  terraform:
+    name: Terraform validate, lint, scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive -diff
+
+      - name: Init
+        # No backend: validation needs no state and no credentials.
+        run: terraform init -backend=false -input=false
+
+      - name: Validate
+        run: terraform validate -no-color
+
+      - name: Install TFLint
+        run: |
+          curl -sSfL -o /tmp/tflint.zip \
+            "https://github.com/terraform-linters/tflint/releases/download/${TFLINT_VERSION}/tflint_linux_amd64.zip"
+          unzip -o -q /tmp/tflint.zip -d /tmp
+          sudo install /tmp/tflint /usr/local/bin/
+
+      - name: TFLint
+        run: |
+          tflint --init --config="${GITHUB_WORKSPACE}/.tflint.hcl"
+          tflint --config="${GITHUB_WORKSPACE}/.tflint.hcl" --format compact
+
+      - name: Install Trivy
+        run: |
+          curl -sSfL -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install /tmp/trivy /usr/local/bin/
+
+      - name: Scan Terraform
+        working-directory: .
+        run: trivy config --config trivy.yaml --ignorefile .trivyignore.yaml terraform/
+
+  manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install kubeconform
+        run: |
+          curl -sSfL -o /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install /tmp/kubeconform /usr/local/bin/
+
+      - name: Render
+        run: kubectl kustomize k8s/base > /tmp/rendered.yaml
+
+      - name: Validate against Kubernetes schemas
+        run: |
+          kubeconform -strict -summary \
+            -kubernetes-version "${KUBERNETES_VERSION}" \
+            -schema-location default \
+            /tmp/rendered.yaml
+
+      - name: Install Trivy
+        run: |
+          curl -sSfL -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install /tmp/trivy /usr/local/bin/
+
+      - name: Scan rendered manifests
+        run: trivy config --config trivy.yaml /tmp/rendered.yaml

@@ -1,0 +1,63 @@
+# Suppressions are documented decisions, not silenced noise. Each carries a
+# justification and an expiry so it has to be re-argued rather than inherited.
+#
+# Both entries below are raised against code inside terraform-aws-modules/eks,
+# not against this repository directly. They are consequences of deliberate
+# configuration choices, and both are covered in README "Tradeoffs".
+
+misconfigurations:
+  - id: AWS-0040
+    statement: >-
+      EKS public API endpoint is enabled.
+
+      Same decision as AWS-0041 below, raised under a second rule ID: one rule
+      objects to the endpoint being public at all, the other to the CIDR range
+      allowed through it. The justification and the production fix are
+      identical, so see AWS-0041 for the full reasoning.
+
+      Note that endpoint_private_access is also enabled, so in-VPC traffic
+      already resolves to the private endpoint and never traverses the public
+      one.
+    expiredAt: 2027-03-31
+
+  - id: AWS-0041
+    statement: >-
+      EKS public API endpoint is open to 0.0.0.0/0.
+
+      Accepted for a review environment. The endpoint must stay reachable from
+      GitHub-hosted CI runners, whose egress addresses are large, published,
+      and frequently rotated, and from a reviewer on an unknown network. There
+      is no narrower CIDR set that satisfies both without pinning to a range
+      wide enough to be meaningless.
+
+      The production fix is architectural rather than a value change: disable
+      public access entirely (endpoint_public_access = false) and reach the API
+      over PrivateLink from self-hosted runners or CodeBuild inside the VPC, or
+      through a bastion. That is out of scope here because it requires CI
+      infrastructure this exercise does not provision.
+
+      Partial mitigation already applied: authentication_mode = "API" with
+      access entries, so reachability alone grants nothing without an
+      authenticated, explicitly authorised IAM principal. The variable
+      cluster_endpoint_public_access_cidrs exists precisely so this can be
+      narrowed without editing code.
+    expiredAt: 2027-03-31
+
+  - id: AWS-0104
+    statement: >-
+      Worker node security group permits unrestricted egress.
+
+      This is the upstream EKS module default and is required for a functioning
+      cluster: nodes must reach the EKS control plane, ECR, S3 for image
+      layers, CloudWatch Logs, and the EC2 and STS APIs. Several of those have
+      no stable published CIDR set.
+
+      Closing it properly means provisioning interface VPC endpoints for each
+      service plus an S3 gateway endpoint, then restricting egress to the
+      endpoint security groups. That is the correct production answer, adds
+      roughly a dozen endpoints at about USD 7/month each, and is deliberately
+      out of scope for a review environment.
+
+      Ingress to the nodes is not affected by this finding and remains
+      restricted to the cluster security group.
+    expiredAt: 2027-03-31

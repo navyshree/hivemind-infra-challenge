@@ -1,0 +1,161 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "k8s/**"
+      - ".github/workflows/cd.yml"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Existing image tag to roll back to. Leave blank to build the current commit."
+        required: false
+        type: string
+
+permissions:
+  # Required to mint the OIDC token exchanged for AWS credentials. No
+  # long-lived access keys are stored in this repository.
+  id-token: write
+  contents: read
+
+# Never let two deploys race to the same cluster. Unlike CI, in-progress runs
+# are not cancelled: aborting midway through a rollout leaves it half applied.
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+env:
+  KUSTOMIZE_VERSION: "v5.8.1"
+
+jobs:
+  deploy:
+    name: Build, push, deploy
+    runs-on: ubuntu-latest
+
+    # Attach required reviewers or a wait timer to this environment in repo
+    # settings to gate production behind an approval.
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            # Immutable, commit-addressable tag. ECR rejects overwrites, so a
+            # tag always identifies exactly one build.
+            echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: cd-${{ github.run_id }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v4
+        if: steps.tag.outputs.build == 'true'
+
+      - name: Build and push
+        if: steps.tag.outputs.build == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./app
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Verify the image exists
+        # Guards the rollback path: a tag typed by hand may not exist, and it is
+        # cheaper to fail here than to watch a rollout stall on ImagePullBackOff.
+        run: |
+          aws ecr describe-images \
+            --repository-name "${{ vars.ECR_REPOSITORY }}" \
+            --image-ids imageTag="${{ steps.tag.outputs.tag }}" \
+            --query 'imageDetails[0].imagePushedAt' --output text
+
+      - name: Install kustomize
+        run: |
+          curl -sSfL -o /tmp/kustomize.tar.gz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/kustomize.tar.gz -C /tmp kustomize
+          sudo install /tmp/kustomize /usr/local/bin/
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region "${{ vars.AWS_REGION }}" --name "${{ vars.EKS_CLUSTER_NAME }}"
+
+      - name: Set image and release tag
+        working-directory: k8s/base
+        run: |
+          kustomize edit set image "greeter=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}"
+          # Rewriting this file changes the generated ConfigMap's hash, which
+          # changes the pod spec, which is what actually forces a rollout.
+          echo "HELLO_TAG=${{ steps.tag.outputs.tag }}" > greeter.env
+          kustomize build . | tee /tmp/to-apply.yaml | head -40
+
+      - name: Apply
+        run: kubectl apply -f /tmp/to-apply.yaml
+
+      - name: Wait for rollout
+        # Fails the job if the new ReplicaSet does not become fully available.
+        # maxUnavailable=0 means a bad image cannot take the service down; the
+        # rollout simply stalls and this step reports it.
+        run: kubectl -n hivemind-greeter rollout status deployment/hivemind-greeter --timeout=5m
+
+      - name: Smoke test through the load balancer
+        run: |
+          set -euo pipefail
+          host=""
+          for _ in $(seq 1 60); do
+            host="$(kubectl -n hivemind-greeter get ingress hivemind-greeter \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+            [ -n "$host" ] && break
+            sleep 5
+          done
+          if [ -z "$host" ]; then
+            echo "::error::ingress never published a load balancer hostname"
+            kubectl -n hivemind-greeter describe ingress hivemind-greeter
+            exit 1
+          fi
+          echo "ALB: http://${host}"
+
+          # A freshly provisioned ALB 503s until its targets register.
+          for i in $(seq 1 60); do
+            body="$(curl -sf --max-time 5 "http://${host}/?name=CI" || true)"
+            if [ -n "$body" ]; then
+              echo "response: $body"
+              case "$body" in
+                *"(tag: ${{ steps.tag.outputs.tag }})"*)
+                  echo "deployed revision is serving traffic"; exit 0 ;;
+                *)
+                  echo "still serving an older revision: $body" ;;
+              esac
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::load balancer never served the new revision"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Report failure context
+        if: failure()
+        run: |
+          kubectl -n hivemind-greeter get pods -o wide || true
+          kubectl -n hivemind-greeter describe deployment hivemind-greeter || true
+          kubectl -n hivemind-greeter logs -l app.kubernetes.io/name=hivemind-greeter --tail=50 --all-containers || true

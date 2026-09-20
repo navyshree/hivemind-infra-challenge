@@ -1,0 +1,22 @@
+# Shared Trivy configuration so a local run and CI produce identical results.
+#
+# Note on scope: the downloaded contents of .terraform/modules are deliberately
+# NOT skipped wholesale. Findings such as the EKS public endpoint CIDR are
+# raised against module code but are direct consequences of values set in this
+# repository, and hiding them would hide a real decision. Only the vendored
+# example manifests and CI workflows inside those modules are excluded, since
+# they are documentation that is never deployed.
+
+scan:
+  skip-dirs:
+    - "**/.terraform/modules/**/examples/**"
+    - "**/.terraform/modules/**/.github/**"
+
+misconfiguration:
+  include-non-failures: false
+
+severity:
+  - HIGH
+  - CRITICAL
+
+exit-code: 1
