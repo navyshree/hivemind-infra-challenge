@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hivemind-greeter
+
+# The namespace is NOT listed here. It is created by Terraform (see
+# terraform/namespace.tf) because a cluster-scoped object would force the CD
+# role up to cluster-wide permissions just to apply this kustomization.
+resources:
+  - service.yaml
+  - deployment.yaml
+  - ingress.yaml
+  - pdb.yaml
+  - hpa.yaml
+
+# Generating the ConfigMap rather than declaring it gives the object a content
+# hash suffix, and Kustomize rewrites the Deployment's reference to match. So
+# changing HELLO_TAG changes the pod spec and triggers a rollout. A static
+# ConfigMap would update silently and leave the old value in running pods.
+#
+# The value is read from greeter.env rather than an inline literal so CD can
+# rewrite one small file instead of editing this one.
+configMapGenerator:
+  - name: hivemind-greeter
+    envs:
+      - greeter.env
+
+# CD overrides this with the immutable, SHA-tagged ECR image:
+#   kustomize edit set image greeter=<account>.dkr.ecr.<region>.amazonaws.com/hivemind-greeter:<sha>
+images:
+  - name: greeter
+    newTag: 0.0.0-placeholder

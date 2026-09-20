@@ -1,0 +1,21 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hivemind-greeter
+  namespace: hivemind-greeter
+  labels:
+    app.kubernetes.io/name: hivemind-greeter
+spec:
+  # With three replicas this permits one voluntary disruption at a time, so a
+  # node drain or cluster upgrade rolls through without taking the service
+  # below two live pods.
+  maxUnavailable: 1
+
+  # Without this, a PDB at its limit blocks eviction even of pods that are
+  # already broken, which can wedge a node drain indefinitely. Unhealthy pods
+  # are not serving traffic, so evicting them costs nothing. (Kubernetes 1.27+)
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind-greeter

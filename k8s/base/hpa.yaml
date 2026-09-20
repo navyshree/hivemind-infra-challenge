@@ -1,0 +1,50 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hivemind-greeter
+  namespace: hivemind-greeter
+  labels:
+    app.kubernetes.io/name: hivemind-greeter
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hivemind-greeter
+
+  # Never scale below one pod per AZ, or the zone spread constraint stops
+  # meaning anything.
+  minReplicas: 3
+  maxReplicas: 12
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Against a 50m request this is a low absolute bar, which is
+          # intentional: the service is cheap and scaling early is preferable
+          # to queueing. A latency- or RPS-based metric via KEDA would track
+          # user-visible behaviour more directly; see README "Tradeoffs".
+          averageUtilization: 70
+
+  behavior:
+    scaleUp:
+      # React immediately to load.
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+        - type: Pods
+          value: 4
+          periodSeconds: 30
+      selectPolicy: Max
+    scaleDown:
+      # Retreat slowly. A five-minute window stops the autoscaler from
+      # oscillating on spiky traffic.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60

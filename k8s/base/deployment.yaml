@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hivemind-greeter
+  namespace: hivemind-greeter
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never drop below the desired count during a rollout: surge first, then
+      # retire. Paired with the ALB readiness gate this gives a genuinely
+      # zero-downtime deploy.
+      maxUnavailable: 0
+      maxSurge: 1
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind-greeter
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hivemind-greeter
+    spec:
+      serviceAccountName: hivemind-greeter
+      # The service makes no Kubernetes API calls, so it has no use for a
+      # projected token.
+      automountServiceAccountToken: false
+
+      # Must exceed the preStop sleep plus the ALB deregistration delay, or the
+      # kubelet SIGKILLs the pod while the load balancer is still draining it.
+      terminationGracePeriodSeconds: 40
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      topologySpreadConstraints:
+        # Hard requirement: replicas must spread across availability zones.
+        # This is what makes the deployment survive an AZ failure.
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: hivemind-greeter
+        # Soft preference: also spread across nodes within a zone. Best effort,
+        # so a node shortage degrades placement rather than blocking a rollout.
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: hivemind-greeter
+
+      containers:
+        - name: greeter
+          # Overwritten per-deploy by `kustomize edit set image`; see the CD
+          # workflow. The placeholder is deliberately not ":latest" — a mutable
+          # tag here would be a real finding rather than a scanner artefact,
+          # and this way the base passes the same policy gate as the output.
+          image: greeter:0.0.0-placeholder
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          env:
+            # The upstream service reads HOSTNAME to identify itself. The
+            # container's UTS hostname is the pod name, but Kubernetes does not
+            # expose it as an environment variable, so bind it explicitly.
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HELLO_TAG
+              valueFrom:
+                configMapKeyRef:
+                  name: hivemind-greeter
+                  key: HELLO_TAG
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              # Memory limit equals its request: memory is incompressible, so a
+              # leak should be OOM-killed rather than allowed to starve
+              # neighbours on the node.
+              memory: 64Mi
+              # Deliberately no CPU limit. A CPU limit throttles via CFS quota
+              # even when the node is idle, which adds tail latency for no
+              # benefit; the request already guarantees the scheduler share.
+
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 15
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          lifecycle:
+            preStop:
+              # Native sleep action (Kubernetes 1.30+). An exec hook would need
+              # a shell, and the image is built FROM scratch. The pause lets the
+              # ALB observe the pod leaving its endpoints and stop sending new
+              # connections before the process begins shutting down.
+              sleep:
+                seconds: 10
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop:
+                - ALL
