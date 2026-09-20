@@ -119,6 +119,19 @@ module "eks" {
         http_put_response_hop_limit = 1
       }
 
+      # Actually enable auto-repair rather than merely installing the agent that
+      # feeds it. The eks-node-monitoring-agent addon above detects the faults;
+      # without this block EKS observes them and does nothing.
+      #
+      # Bounded deliberately. With three nodes, one is a third of the group, so
+      # an unbounded repair could take out a whole AZ's capacity while the
+      # replacement boots — and the zone spread constraint is DoNotSchedule, so
+      # those pods would stay Pending rather than move.
+      node_repair_config = {
+        enabled                           = true
+        max_parallel_nodes_repaired_count = 1
+      }
+
       labels = {
         workload = "general"
       }

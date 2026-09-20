@@ -63,7 +63,9 @@ make url                                              # prints the public URL
 Useful variables: `region`, `kubernetes_version` (keep it in **standard**
 support — extended support bills at $0.60/cluster-hour instead of $0.10),
 `single_nat_gateway=true` to save ~$76/month at the cost of AZ-independent
-egress, and `github_repository=owner/repo` to create the OIDC deploy role.
+egress, and `github_repository=owner/repo` to create the OIDC deploy role. The
+full set, with the reasoning behind each default, is in
+[`terraform/variables.tf`](terraform/variables.tf).
 
 ### Using it
 
@@ -159,8 +161,15 @@ than an exec hook, because the image has no shell.
 A `PodDisruptionBudget` (`maxUnavailable: 1`, `unhealthyPodEvictionPolicy:
 AlwaysAllow`) keeps two replicas up during node drains without letting a broken
 pod wedge the drain. One NAT gateway per AZ means losing an AZ does not sever
-egress for the survivors. Control plane logs go to CloudWatch;
-`eks-node-monitoring-agent` feeds node auto-repair.
+egress for the survivors. Control plane logs go to CloudWatch.
+
+Node auto-repair is **enabled and bounded**: `eks-node-monitoring-agent` detects
+kernel, networking and storage faults, and `node_repair_config` lets EKS act on
+them — capped at one node at a time, because with three nodes an unbounded
+repair could remove a third of the group while the replacement boots, and the
+zone-spread constraint is `DoNotSchedule`, so displaced pods would stay Pending
+rather than move. Installing the agent without the config is a common trap: EKS
+sees the faults and does nothing.
 
 ---
 
@@ -238,8 +247,18 @@ Things that will bite someone who did not write this.
 - **HPA `minReplicas` must stay at or above the AZ count.** Drop it to 1 and
   the zone-spread constraint still passes while the availability story is gone.
 - **ECR tags are immutable.** Rebuilding the same commit cannot re-push the same
-  tag; the push fails rather than silently replacing. Intended — but it means a
-  retry after a partial failure needs a new tag.
+  tag; the push fails rather than silently replacing. Intended — and it does not
+  block a retry: the tag is commit-derived and cannot be reminted, so dispatch
+  the CD workflow with `image_tag=sha-<commit>` instead. That skips the build
+  entirely and resumes at the image-exists check.
+- **`terraform destroy` can leave an orphaned control-plane log group.** EKS
+  flushes buffered events after the group is deleted, which re-creates it; the
+  next `apply` then fails with `ResourceAlreadyExistsException` on
+  `/aws/eks/<cluster>/cluster`. Delete it before re-applying:
+  `aws logs delete-log-group --log-group-name /aws/eks/hivemind-greeter/cluster`.
+  Do *not* "fix" this with `create_cloudwatch_log_group = false` — AWS then
+  auto-creates the group and silently discards the 30-day retention, leaving
+  control-plane logs on Never-expire.
 - **`force_delete = true` on the ECR repository** means `terraform destroy`
   takes the image history with it. Fine for a review environment, wrong for one
   you might need to roll back.

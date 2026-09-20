@@ -142,32 +142,45 @@ resource "aws_cloudwatch_metric_alarm" "target_latency" {
   tags          = local.tags
 }
 
-# Node-level failure, which the ALB metrics would only show indirectly and late.
-resource "aws_cloudwatch_metric_alarm" "cluster_failed_nodes" {
+# Node-level capacity loss, which the ALB metrics would only show indirectly
+# and late.
+#
+# This deliberately does NOT use ContainerInsights' cluster_failed_node_count.
+# Nothing publishes that namespace unless the amazon-cloudwatch-observability
+# addon is installed, so such an alarm would sit in INSUFFICIENT_DATA forever —
+# which the header of this file calls worse than having no alarm at all. An
+# earlier revision shipped exactly that contradiction.
+#
+# GroupInServiceInstances is published by the node group's Auto Scaling group
+# with no addon and no agent, and it captures the thing actually worth paging
+# on: fewer healthy nodes than the deployment needs. It also covers node
+# auto-repair replacing an instance, since the count dips while it does.
+resource "aws_cloudwatch_metric_alarm" "node_capacity" {
   count = local.alerting_enabled ? 1 : 0
 
-  alarm_name        = "${local.name}-failed-nodes"
-  alarm_description = "The EKS cluster reports one or more failed nodes."
+  alarm_name        = "${local.name}-node-capacity"
+  alarm_description = "Fewer in-service nodes than the deployment's zone spread requires."
 
-  namespace   = "ContainerInsights"
-  metric_name = "cluster_failed_node_count"
-  statistic   = "Maximum"
+  namespace   = "AWS/AutoScaling"
+  metric_name = "GroupInServiceInstances"
+  statistic   = "Minimum"
 
   dimensions = {
-    ClusterName = module.eks.cluster_name
+    AutoScalingGroupName = one(module.eks.eks_managed_node_groups["default"].node_group_autoscaling_group_names)
   }
 
   period              = 300
   evaluation_periods  = 2
   datapoints_to_alarm = 2
-  threshold           = 0
-  comparison_operator = "GreaterThanThreshold"
+  # Below one node per AZ the hard topology spread cannot be satisfied and new
+  # pods stay Pending, so this is the point at which a rollout would stall.
+  threshold           = var.az_count
+  comparison_operator = "LessThanThreshold"
 
-  # ContainerInsights publishes nothing unless the CloudWatch observability
-  # addon is installed, so this alarm sits in INSUFFICIENT_DATA until it is.
-  # Left in place as the hook for that, and called out in the README.
-  treat_missing_data = "missing"
+  # A gap here means the ASG stopped reporting, which is itself worth knowing.
+  treat_missing_data = "breaching"
 
   alarm_actions = [aws_sns_topic.alerts[0].arn]
+  ok_actions    = [aws_sns_topic.alerts[0].arn]
   tags          = local.tags
 }
