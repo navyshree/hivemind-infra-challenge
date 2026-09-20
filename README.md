@@ -123,8 +123,11 @@ CI authenticates to AWS by **GitHub OIDC** — no long-lived key exists in the
 repository — and the trust policy is scoped by `sub` to this repo and to `main`
 or the `production` environment. ECR tags are immutable with scan-on-push.
 
-**Not covered:** TLS, WAF, a private API endpoint, restricted node egress. See
-[Tradeoffs](#tradeoffs).
+TLS 1.3 terminates at the ALB, though on a self-signed certificate — see
+[Tradeoffs](#tradeoffs) for what that does and does not buy.
+
+**Not covered:** a publicly trusted certificate, WAF, a private API endpoint,
+restricted node egress. See [Tradeoffs](#tradeoffs).
 
 ### Performance
 
@@ -174,12 +177,23 @@ sees the faults and does nothing.
 
 Ordered by how much they would matter in production.
 
-**1. No TLS.** The ALB listens on HTTP/80 only. HTTPS needs a domain and an ACM
-certificate, neither of which this exercise provisions, so **traffic is
-unencrypted in transit — unacceptable for real production**. The annotations are
-written and commented in [`ingress.yaml`](k8s/base/ingress.yaml): add
-`certificate-arn`, add 443 to `listen-ports`, set `ssl-redirect: "443"` and pin
-`ELBSecurityPolicy-TLS13-1-2-2021-06`.
+**1. TLS is self-signed, so it is not publicly trusted.** HTTPS works — the ALB
+terminates **TLS 1.3** on an `ELBSecurityPolicy-TLS13-1-2-2021-06` listener, and
+the certificate carries the load balancer's own hostname in its SAN, so the only
+thing wrong with it is the issuer. What is missing is a signature from a CA
+browsers already trust, which needs a domain this exercise does not own.
+
+Two consequences, both deliberate. There is **no `ssl-redirect`**: forcing 80
+onto a self-signed 443 would put every visitor behind a browser interstitial,
+which is worse than plain HTTP, so HTTPS is offered *alongside* port 80 rather
+than in place of it. And there is **no HSTS**, because pinning clients to an
+endpoint they cannot validate is a hard mistake to undo.
+
+Closing it properly is a domain and about ten minutes: issue a public ACM
+certificate with DNS validation, swap the ARN, turn on `ssl-redirect`, then add
+HSTS. Reproduce the current certificate with
+[`scripts/tls-selfsigned.sh`](scripts/tls-selfsigned.sh); the overlay is
+[`k8s/overlays/tls/`](k8s/overlays/tls/).
 
 **2. Terraform state is local.** A shared environment needs a remote backend
 with locking or two concurrent applies corrupt state. The S3 backend block with
@@ -346,6 +360,9 @@ reproduces the static half; CI runs it on every push.
   earlier tag was tested.
 - **Teardown:** deleting the Ingress released the ALB and its ENIs, which is the
   step that makes `terraform destroy` terminate rather than hang.
+- **TLS:** the ALB negotiates `TLSv1.3 / AEAD-AES128-GCM-SHA256` and serves the
+  application over it; port 80 still answers 200, so no visitor is pushed into
+  a certificate warning.
 
 Static gates, all clean: Go tests under `-race` with a coverage floor,
 `golangci-lint`, `govulncheck`, `terraform validate` / `test` / `tflint`,
@@ -369,4 +386,5 @@ surviving the loss of an AZ is inferred from that.
   BASIC scanning cannot read a scratch image.
 - Terminate a node, and ideally cordon an AZ, to turn the AZ-tolerance claim
   from inference into evidence.
-- Add TLS once a domain and ACM certificate exist.
+- Replace the self-signed certificate with a publicly trusted one once a
+  domain exists, then enable `ssl-redirect` and HSTS.

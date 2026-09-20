@@ -4,20 +4,27 @@ metadata:
   name: hivemind-greeter
   namespace: hivemind-greeter
   annotations:
-    # Listen on both, and redirect the plaintext listener rather than dropping
-    # it — a bare http:// link should reach the service, not fail.
+    # Both listeners, and deliberately NO ssl-redirect.
+    #
+    # With a publicly trusted certificate you would redirect 80 -> 443 and be
+    # done. With a self-signed one, forcing the redirect sends every visitor
+    # into a browser interstitial, which is strictly worse than plain HTTP.
+    # So HTTPS is offered alongside port 80 rather than in place of it. Turn
+    # the redirect on the moment a trusted certificate replaces this one.
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
 
     # Pinned rather than left to the ALB default, which trails the current
     # recommendation. TLS 1.3 preferred, 1.2 floor, no RC4/3DES/CBC-SHA.
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
 
-    # Replace with a real ARN. Terraform prints nothing for this because the
-    # certificate is not provisioned here: issuing one requires a domain in
-    # Route 53 (or DNS validation elsewhere), which the exercise does not own.
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-central-1:000000000000:certificate/REPLACE-ME
+    # Substituted at apply time — the ARN embeds the AWS account id, which does
+    # not belong in a committed file. Generate and import with
+    # scripts/tls-selfsigned.sh, then:
+    #
+    #   ARN=$(scripts/tls-selfsigned.sh)
+    #   kubectl kustomize k8s/overlays/tls | sed "s|REPLACE-ME|${ARN}|" | kubectl apply -f -
+    alb.ingress.kubernetes.io/certificate-arn: REPLACE-ME
 
-    # HSTS is applied at the application or a response-header rule rather than
-    # here; the ALB has no annotation for it. Worth adding once the domain is
-    # stable, and only then — a bad max-age is hard to walk back.
+    # HSTS is deliberately absent. It belongs with a trusted certificate and a
+    # stable domain; asserting it against a self-signed cert would pin clients
+    # to an endpoint they cannot validate, and a bad max-age is hard to undo.
