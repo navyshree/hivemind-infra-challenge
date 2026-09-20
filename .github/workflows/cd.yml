@@ -75,6 +75,14 @@ jobs:
           context: ./app
           push: true
           tags: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
+          # Built for both architectures so the node group can move to Graviton
+          # without a pipeline change. The Dockerfile already takes TARGETARCH
+          # and the binary is statically linked, so this costs only build time.
+          #
+          # Note this also produces a manifest list, which ECR BASIC scanning
+          # cannot read — immaterial here, since a scratch image defeats BASIC
+          # scanning regardless. See the attestation note below.
+          platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

@@ -90,6 +90,10 @@ jobs:
   image:
     name: Image build, scan, smoke test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to publish SARIF to the Security tab. Scoped to this job only.
+      security-events: write
     steps:
       - uses: actions/checkout@v7
 
@@ -114,6 +118,32 @@ jobs:
 
       - name: Scan image for vulnerabilities
         run: trivy image --severity HIGH,CRITICAL --exit-code 1 --no-progress greeter:ci
+
+      - name: Export scan results as SARIF
+        # Failing the build is the gate; SARIF is the record. Uploading it puts
+        # findings in the repository's Security tab with history, so a CVE
+        # disclosed against an already-merged image is visible rather than
+        # buried in an old job log.
+        if: always()
+        run: trivy image --format sarif --output trivy.sarif --no-progress greeter:ci
+
+      - name: Upload SARIF to the Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
+
+      - name: Generate CycloneDX SBOM
+        # A scratch image has no OS package manifest, so the SBOM is the only
+        # machine-readable statement of what is actually inside it.
+        run: trivy image --format cyclonedx --output sbom.cdx.json --no-progress greeter:ci
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 30
 
       - name: Scan Dockerfile
         run: trivy config --config trivy.yaml app/Dockerfile
@@ -216,6 +246,12 @@ jobs:
             "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
           tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
           sudo install /tmp/kubeconform /usr/local/bin/
+
+      - name: Check NetworkPolicy CIDRs still match the Terraform subnets
+        # The policy names the public subnet ranges as literals because
+        # Kustomize cannot read Terraform. This recomputes them and fails on
+        # divergence, so the coupling is enforced rather than commented.
+        run: python3 scripts/check-cidrs.py
 
       - name: Render
         run: kubectl kustomize k8s/base > /tmp/rendered.yaml

@@ -38,15 +38,22 @@ spec:
     # the whole VPC CIDR would be simpler and would defeat the point, since
     # every pod also holds a VPC address under the VPC CNI.
     #
-    # These CIDRs track local.public_subnets in terraform/main.tf
-    # (cidrsubnet(var.vpc_cidr, 4, 0..2)). They must be updated together.
+    # This must stay in step with local.public_subnets in terraform/main.tf,
+    # which is cidrsubnet(var.vpc_cidr, 4, 0..az_count-1) — so /20s at indices
+    # 0..3 for the supported az_count range of 2..4.
+    #
+    # A single /18 covers indices 0..3 (10.0.0.0 - 10.0.63.255) and still stops
+    # short of the private subnets, which begin at index 8 (10.0.128.0).
+    # Listing the three /20s individually would have been more explicit and
+    # would silently stop admitting the ALB the moment az_count became 4 — a
+    # supported value.
+    #
+    # The remaining coupling is to var.vpc_cidr itself. scripts/check-cidrs.py
+    # recomputes this from the Terraform variables and fails CI on divergence,
+    # so this is a checked claim rather than a comment asking to be believed.
     - from:
         - ipBlock:
-            cidr: 10.0.0.0/20    # public eu-central-1a
-        - ipBlock:
-            cidr: 10.0.16.0/20   # public eu-central-1b
-        - ipBlock:
-            cidr: 10.0.32.0/20   # public eu-central-1c
+            cidr: 10.0.0.0/18
       ports:
         - protocol: TCP
           port: 8080

@@ -218,6 +218,58 @@ region, so an AZ failure is survived and a region failure is not.
 
 ---
 
+## Operational gotchas
+
+Things that will bite someone who did not write this.
+
+- **Teardown order is not optional.** The ALB is created by the controller, not
+  by Terraform. Destroy infrastructure first and its ENIs strand in the subnets
+  and hang VPC deletion. Use `make destroy`.
+- **`HELLO_TAG` must stay tied to the image tag.** CD writes both from the same
+  value. Setting it by hand for a quick rollout makes the service advertise a
+  release that does not exist — the tag stops meaning anything.
+- **HPA `minReplicas` must stay at or above the AZ count.** Drop it to 1 and
+  the zone-spread constraint still passes while the availability story is gone.
+- **ECR tags are immutable.** Rebuilding the same commit cannot re-push the same
+  tag; the push fails rather than silently replacing. Intended — but it means a
+  retry after a partial failure needs a new tag.
+- **`force_delete = true` on the ECR repository** means `terraform destroy`
+  takes the image history with it. Fine for a review environment, wrong for one
+  you might need to roll back.
+- **The NetworkPolicy CIDRs are VPC-shaped.** They are literals because
+  Kustomize cannot read Terraform. `scripts/check-cidrs.py` fails CI if they
+  drift from `var.vpc_cidr`; do not silence it.
+- **Readiness gates are absent on a service's very first deploy.** The
+  controller's webhook only injects them once a `TargetGroupBinding` exists, so
+  the initial rollout has a weaker guarantee than every one after it.
+- **ECR BASIC scanning cannot read this image.** A scratch image has no OS and
+  no package manager, so scans fail with `UnsupportedImageError`. The flag is
+  left enabled because it becomes real under Enhanced scanning; until then
+  Trivy in CI is the control.
+- **Node-level termination is not budgeted.** The pod drain chain fits in 40s,
+  but nothing here handles a node going away underneath it. Adopting spot or
+  Karpenter means adding that budget — see
+  [ADR 0001](docs/decisions/0001-fixed-node-group-over-karpenter.md).
+
+## References
+
+Upstream issues and docs this design leans on.
+
+- [karpenter#1599](https://github.com/kubernetes-sigs/karpenter/issues/1599),
+  [karpenter#2600](https://github.com/kubernetes-sigs/karpenter/issues/2600),
+  [kubernetes#90977](https://github.com/kubernetes/kubernetes/issues/90977) —
+  eviction and consolidation versus PodDisruptionBudgets; the reasoning in
+  ADR 0001.
+- [EKS Kubernetes version support](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html)
+  — standard versus extended support, and the billing difference.
+- [aws-load-balancer-controller](https://github.com/kubernetes-sigs/aws-load-balancer-controller)
+  — the chart skipped 2.x entirely, so chart 3.5.0 is controller v3.5.0 and a
+  "1.x" chart is old rather than stable.
+- [Pod readiness gates](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/deploy/pod_readiness_gate/)
+  — why the namespace carries `elbv2.k8s.aws/pod-readiness-gate-inject`.
+- [matchLabelKeys in topology spread](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/)
+  — why the spread constraint is scoped to `pod-template-hash`.
+
 ## Cost
 
 Rates from the AWS Price List API for `eu-central-1`, 2026-09-20.

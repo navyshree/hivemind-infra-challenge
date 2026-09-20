@@ -92,6 +92,23 @@ smoke: ## Curl the deployed service through the ALB
 	 echo "GET /        -> $$(curl -sf --max-time 10 "http://$$host/")"; \
 	 echo "GET /?name=  -> $$(curl -sf --max-time 10 "http://$$host/?name=Ada")"
 
+# ---- packaging ------------------------------------------------------------------
+
+.PHONY: package
+package: ## Build the submission zip from tracked files only
+	@# git archive emits exactly what is committed. Zipping the working
+	@# directory instead would ship terraform.tfstate — which carries the AWS
+	@# account id, VPC and subnet ids, security groups, IAM role ARNs and the
+	@# cluster CA — plus ~970MB of .terraform provider binaries. .gitignore
+	@# does not apply inside a zip, so this must not be done by hand.
+	@test -z "$$(git status --porcelain)" || { echo "refusing: working tree is dirty"; git status --short; exit 1; }
+	@rm -f hivemind-greeter.zip
+	@git archive --format=zip --prefix=hivemind-greeter/ -o hivemind-greeter.zip HEAD
+	@echo "wrote hivemind-greeter.zip ($$(du -h hivemind-greeter.zip | cut -f1), $$(unzip -l hivemind-greeter.zip | tail -1 | awk '{print $$2}') files)"
+	@echo "verifying no state, provider cache or credentials leaked:"
+	@! unzip -l hivemind-greeter.zip | grep -qE 'tfstate|\.terraform/|coverage\.out|\.env$$|credentials' \
+	  && echo "  clean" || { echo "  LEAK DETECTED"; exit 1; }
+
 .PHONY: destroy
 destroy: ## Tear down in the correct order (workload first, then infrastructure)
 	@echo "==> Deleting the workload so the controller releases the ALB."

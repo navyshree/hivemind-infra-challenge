@@ -60,6 +60,17 @@ module "vpc" {
   enable_dns_hostnames = true
   enable_dns_support   = true
 
+  # VPC Flow Logs. Without them there is no record of who talked to what, so a
+  # NetworkPolicy can be verified as configured but never as effective, and an
+  # incident has no network evidence to reconstruct from.
+  enable_flow_log                                 = var.enable_flow_logs
+  create_flow_log_cloudwatch_log_group            = var.enable_flow_logs
+  create_flow_log_cloudwatch_iam_role             = var.enable_flow_logs
+  flow_log_cloudwatch_log_group_retention_in_days = 30
+  # REJECT only: accepted traffic is high-volume and low-signal here, while
+  # rejects are what show a policy biting or something probing.
+  flow_log_traffic_type = "REJECT"
+
   # Subnet discovery tags for the AWS Load Balancer Controller. Without these
   # the controller cannot decide where to place an ALB and ingress silently
   # never provisions.

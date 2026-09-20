@@ -51,6 +51,18 @@ variable "az_count" {
   }
 }
 
+variable "enable_flow_logs" {
+  description = <<-EOT
+    Record VPC Flow Logs to CloudWatch.
+
+    Limited to REJECT traffic, which keeps ingestion cost near zero at this
+    volume while still capturing the signal that matters: policy denials and
+    probing. Switch to ALL for a real investigation.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "single_nat_gateway" {
   description = <<-EOT
     Route all private egress through one NAT gateway instead of one per AZ.
