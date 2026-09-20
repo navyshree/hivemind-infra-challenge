@@ -155,17 +155,6 @@ variable "cluster_admin_principal_arns" {
 
 # ---- application -------------------------------------------------------------
 
-variable "hello_tag" {
-  description = <<-EOT
-    Value of HELLO_TAG exposed by the service.
-
-    The CI pipeline overrides this with the deployed image tag so a response
-    identifies the exact release serving it.
-  EOT
-  type        = string
-  default     = "local-dev"
-}
-
 variable "enable_enhanced_scanning" {
   description = <<-EOT
     Switch the registry to ECR Enhanced scanning (Amazon Inspector).

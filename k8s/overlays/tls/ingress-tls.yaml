@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hivemind-greeter
+  namespace: hivemind-greeter
+  annotations:
+    # Listen on both, and redirect the plaintext listener rather than dropping
+    # it — a bare http:// link should reach the service, not fail.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # Pinned rather than left to the ALB default, which trails the current
+    # recommendation. TLS 1.3 preferred, 1.2 floor, no RC4/3DES/CBC-SHA.
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+
+    # Replace with a real ARN. Terraform prints nothing for this because the
+    # certificate is not provisioned here: issuing one requires a domain in
+    # Route 53 (or DNS validation elsewhere), which the exercise does not own.
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-central-1:000000000000:certificate/REPLACE-ME
+
+    # HSTS is applied at the application or a response-header rule rather than
+    # here; the ALB has no annotation for it. Worth adding once the domain is
+    # stable, and only then — a bad max-age is hard to walk back.

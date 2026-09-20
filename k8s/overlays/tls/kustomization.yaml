@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# TLS overlay.
+#
+# The base serves HTTP only because this deployment owns no domain and so has
+# no ACM certificate to attach — see README "Tradeoffs". Rather than leave that
+# as a paragraph explaining what we would have done, the configuration exists
+# and is validated in CI; it needs one real certificate ARN to become live:
+#
+#   1. Issue or import a certificate in ACM in the cluster's region.
+#   2. Put its ARN in ingress-tls.yaml.
+#   3. kubectl apply -k k8s/overlays/tls
+#
+# Point the domain's DNS at the ALB hostname and the redirect does the rest.
+
+resources:
+  - ../../base
+
+patches:
+  - path: ingress-tls.yaml
+    target:
+      kind: Ingress
+      name: hivemind-greeter

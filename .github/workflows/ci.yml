@@ -254,14 +254,18 @@ jobs:
         run: python3 scripts/check-cidrs.py
 
       - name: Render
-        run: kubectl kustomize k8s/base > /tmp/rendered.yaml
+        run: |
+          kubectl kustomize k8s/base > /tmp/rendered.yaml
+          # The TLS overlay is validated too, so it cannot rot into a
+          # configuration that is documented but would not apply.
+          kubectl kustomize k8s/overlays/tls > /tmp/rendered-tls.yaml
 
       - name: Validate against Kubernetes schemas
         run: |
           kubeconform -strict -summary \
             -kubernetes-version "${KUBERNETES_VERSION}" \
             -schema-location default \
-            /tmp/rendered.yaml
+            /tmp/rendered.yaml /tmp/rendered-tls.yaml
 
       - name: Install Trivy
         run: |

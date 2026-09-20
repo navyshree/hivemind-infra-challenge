@@ -53,11 +53,6 @@ output "ecr_repository_url" {
   value       = aws_ecr_repository.greeter.repository_url
 }
 
-output "hello_tag" {
-  description = "HELLO_TAG value Terraform was applied with."
-  value       = var.hello_tag
-}
-
 output "github_deploy_role_arn" {
   description = "IAM role GitHub Actions assumes via OIDC. Null when github_repository is unset."
   value       = local.github_oidc_enabled ? aws_iam_role.github_deploy[0].arn : null
