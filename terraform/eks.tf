@@ -62,6 +62,14 @@ module "eks" {
     vpc-cni = {
       # The CNI runs before nodes are ready, so it must not wait on them.
       before_compute = true
+
+      # NetworkPolicy enforcement is OFF by default in the VPC CNI. Without
+      # this the NetworkPolicy objects in k8s/base are accepted by the API
+      # server and silently enforce nothing, which is worse than having none
+      # at all: the cluster looks segmented and is not.
+      configuration_values = jsonencode({
+        enableNetworkPolicy = "true"
+      })
     }
 
     # Supplies the resource metrics API. Without it the HorizontalPodAutoscaler

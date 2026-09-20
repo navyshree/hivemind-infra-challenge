@@ -12,6 +12,7 @@ resources:
 - ingress.yaml
 - pdb.yaml
 - hpa.yaml
+- networkpolicy.yaml
 
 # Generating the ConfigMap rather than declaring it gives the object a content
 # hash suffix, and Kustomize rewrites the Deployment's reference to match. So

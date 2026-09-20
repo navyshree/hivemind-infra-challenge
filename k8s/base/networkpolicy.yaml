@@ -1,0 +1,70 @@
+# Default deny. Anything not explicitly permitted below is dropped, so a new
+# workload added to this namespace starts closed rather than open.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: hivemind-greeter
+  labels:
+    app.kubernetes.io/name: hivemind-greeter
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hivemind-greeter
+  namespace: hivemind-greeter
+  labels:
+    app.kubernetes.io/name: hivemind-greeter
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: hivemind-greeter
+
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Only the load balancer may reach the service.
+    #
+    # These are the public subnets, where the ALB's ENIs live. Pods and nodes
+    # sit in the private subnets (10.0.128.0/20 and up), so listing the public
+    # ranges admits the ALB while leaving pod-to-pod traffic denied. Allowing
+    # the whole VPC CIDR would be simpler and would defeat the point, since
+    # every pod also holds a VPC address under the VPC CNI.
+    #
+    # These CIDRs track local.public_subnets in terraform/main.tf
+    # (cidrsubnet(var.vpc_cidr, 4, 0..2)). They must be updated together.
+    - from:
+        - ipBlock:
+            cidr: 10.0.0.0/20    # public eu-central-1a
+        - ipBlock:
+            cidr: 10.0.16.0/20   # public eu-central-1b
+        - ipBlock:
+            cidr: 10.0.32.0/20   # public eu-central-1c
+      ports:
+        - protocol: TCP
+          port: 8080
+
+  egress:
+    # DNS only. The greeter makes no outbound calls of its own; this exists so
+    # that cluster DNS resolution keeps working for anything the runtime does
+    # implicitly, and so the failure mode is a clear DNS error rather than a
+    # silent hang if that ever changes.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
