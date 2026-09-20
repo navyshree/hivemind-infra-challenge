@@ -478,10 +478,45 @@ plainly at the end.
 | `actionlint` + `shellcheck` | 0 issues |
 | ConfigMap hash rotation | confirmed: changing `HELLO_TAG` changes the hash, forcing a rollout |
 
-**Not verified:** no `terraform apply` was run, because no AWS account was
-available. Provider and module schemas were checked against the real registry
-and the config validates, but **no infrastructure has been created and the
-deployment has not been exercised against a live cluster.** Version-sensitive
-choices (EKS 1.36, chart 3.5.0, provider v6/v3 syntax) were each confirmed
-against primary sources rather than recalled, but "validates" is a weaker claim
-than "applies cleanly", and the gap is real.
+### Deployed to a real Kubernetes cluster
+
+Schema validation only proves a manifest is well-formed, not that it runs. The
+workload was therefore deployed to a live 3-node Kubernetes 1.37 cluster whose
+nodes carry real `topology.kubernetes.io/zone` labels, using the unmodified
+`k8s/base` kustomization.
+
+| Check | Result |
+|---|---|
+| Admission under `restricted` Pod Security | all 7 objects accepted, no violations |
+| Pods scheduled | 3/3 Running, **0 restarts** |
+| Zone spread (hard constraint) | exactly one pod per zone, across all three |
+| Service load balancing | 60 requests distributed across all 3 backends |
+| Greeting by `?name=` | 60/60 correct |
+| `HELLO_TAG` propagation | 60/60 responses carried the tag |
+| IP fallback, 404, `nosniff` headers | all correct through the Service |
+| **Rolling update, measured under load** | **142 requests at 10/s across a full 3-pod replacement — 0 failures**, rollout completed in 8.1s |
+| Zone spread after rollout | still one per zone |
+| Runtime security context | `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false`, all capabilities dropped, UID 65532 — confirmed on the running pod |
+| PodDisruptionBudget | admitted, 1 allowed disruption |
+| ConfigMap-hash rollout trigger | changing `HELLO_TAG` produced a new hash and drove a rollout |
+
+The zero-downtime result is the meaningful one: it exercises `maxUnavailable: 0`,
+the readiness probes, the `preStop` sleep and the server's own drain together,
+which is the chain the HA claim rests on.
+
+### What is still unverified
+
+- **No `terraform apply` has run.** No AWS account was available, so no
+  infrastructure has been created. Provider and module schemas were checked
+  against the live registry and the configuration validates, but "validates" is
+  a weaker claim than "applies cleanly".
+- **The AWS-specific layer is untested by consequence:** the ALB and its
+  Ingress annotations, ALB pod readiness gates, IRSA, the EKS addons, and the
+  OIDC deploy role. The local cluster has no Load Balancer Controller, so the
+  readiness-gate half of the zero-downtime chain was not exercised — only the
+  Kubernetes half.
+- **The HPA was admitted but never scaled**, since the local cluster has no
+  `metrics-server`. On EKS it is installed as a managed addon.
+- Version-sensitive choices (EKS 1.36, chart 3.5.0, provider v6/v3 syntax) were
+  each confirmed against primary sources rather than recalled, but confirming a
+  version is not the same as running it.
