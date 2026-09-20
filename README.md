@@ -67,8 +67,15 @@ with a CI/CD pipeline and a documented production-readiness position.
 **What makes it highly available**
 
 - Three AZs, with a **hard** `topologySpreadConstraint` on
-  `topology.kubernetes.io/zone` (`whenUnsatisfiable: DoNotSchedule`). Replicas
-  cannot all land in one AZ.
+  `topology.kubernetes.io/zone` (`whenUnsatisfiable: DoNotSchedule`), scoped by
+  `matchLabelKeys: [pod-template-hash]`.
+
+  That last part is load-bearing and easy to miss. Without it the constraint
+  counts pods from *both* ReplicaSets during a surge rollout, since they share
+  a label selector. Every individual placement stays legal, but the surviving
+  set can end up 2/1/0 across three zones — which is exactly what happened on
+  the real cluster before it was added. Scoping the count to one revision
+  restores a true one-pod-per-AZ guarantee across rollouts.
 - One NAT gateway per AZ, so losing an AZ does not sever egress for the others.
 - `maxUnavailable: 0` on the rolling update, plus ALB pod readiness gates: new
   pods must be passing target-group health checks before old ones retire.
@@ -519,19 +526,51 @@ What this does **not** establish is AZ fault tolerance. Three containers on one
 laptop with zone-shaped labels prove the scheduler honours the constraint; they
 say nothing about surviving the loss of a real availability zone.
 
+### Deployed to AWS
+
+`terraform apply` was run against a real account in `eu-central-1`. The full
+stack was created — 80 resources — and the service served live traffic through
+an internet-facing ALB.
+
+| Check | Result |
+|---|---|
+| `terraform apply` | **80/80 resources created** |
+| EKS cluster | ACTIVE, **v1.36.4-eks**, `authenticationMode: API` |
+| Nodes | 3 Ready on AL2023, one per real AZ (`1a`/`1b`/`1c`) |
+| Managed addons | all 6 installed: `coredns`, `kube-proxy`, `vpc-cni`, `eks-pod-identity-agent`, `metrics-server`, `eks-node-monitoring-agent` |
+| AWS Load Balancer Controller | 2/2 Running, 0 restarts — **IRSA working** |
+| Image | built for `linux/amd64`, pushed to ECR under an immutable SHA tag |
+| ALB provisioned from the Ingress | yes, all **3 targets healthy** |
+| Live request by name | `Hello, Hivemind! I'm hivemind-greeter-… (tag: sha-…)` |
+| Live IP fallback, `/healthz`, 404, `nosniff` | all correct through the ALB |
+| ALB load balancing | distributed across all 3 pods |
+| **Rolling update through the real ALB** | **206 requests, 0 failures**; a second rollout after the spread fix: **186 requests, 0 failures** |
+| Pod readiness gates | injected: `target-health.elbv2.k8s.aws/…` |
+| HPA with real `metrics-server` | reporting `cpu: 2%/70%`, 3 replicas |
+
+**Two findings that only a real deployment surfaces**, both now fixed in this
+repository:
+
+1. **Zone skew after rollout.** Pods landed 2/1/0 across AZs despite a hard
+   spread constraint. Cause: the constraint counted both ReplicaSets during a
+   surge rollout. Fixed with `matchLabelKeys: [pod-template-hash]`; re-verified
+   as 1/1/1 after a subsequent rollout.
+2. **Readiness gates are absent on the very first deploy.** The controller's
+   webhook only injects the gate into pods created *after* the
+   `TargetGroupBinding` exists, so the initial rollout runs without it and
+   every rollout thereafter has it. Not a misconfiguration, but worth knowing:
+   the first deploy of a new service has a weaker zero-downtime guarantee than
+   subsequent ones.
+
 ### What is still unverified
 
-- **No `terraform apply` has run.** No AWS account was available, so no
-  infrastructure has been created. Provider and module schemas were checked
-  against the live registry and the configuration validates, but "validates" is
-  a weaker claim than "applies cleanly".
-- **The AWS-specific layer is untested by consequence:** the ALB and its
-  Ingress annotations, ALB pod readiness gates, IRSA, the EKS addons, and the
-  OIDC deploy role. The local cluster has no Load Balancer Controller, so the
-  readiness-gate half of the zero-downtime chain was not exercised — only the
-  Kubernetes half.
-- **The HPA was admitted but never scaled**, since the local cluster has no
-  `metrics-server`. On EKS it is installed as a managed addon.
-- Version-sensitive choices (EKS 1.36, chart 3.5.0, provider v6/v3 syntax) were
-  each confirmed against primary sources rather than recalled, but confirming a
-  version is not the same as running it.
+- **The CI/CD pipeline has never executed.** It is written, `actionlint`- and
+  `shellcheck`-clean, but no GitHub repository exists yet, so no workflow run
+  has happened. The OIDC deploy role was consequently not created either
+  (`github_repository` was left empty).
+- **No real AZ failure was simulated.** One pod per AZ is confirmed; surviving
+  the loss of an AZ is inferred from that, not demonstrated.
+- **The HPA never actually scaled.** It reads real metrics and sits at 2% of a
+  70% target, but no load test drove it past the threshold.
+- **No TLS.** The ALB serves HTTP only, by the deliberate omission described
+  under Tradeoffs.

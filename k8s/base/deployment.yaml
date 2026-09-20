@@ -51,6 +51,20 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: hivemind-greeter
+          # Scope the count to this revision only.
+          #
+          # Without this the constraint counts the outgoing ReplicaSet too,
+          # because both revisions share the selector above. During a surge
+          # rollout the scheduler then places each new pod against a
+          # distribution that includes pods about to disappear: every
+          # individual placement is legal, yet the surviving set can land 2/1/0
+          # across three zones. Observed exactly that on a real cluster before
+          # adding this.
+          #
+          # pod-template-hash differs per revision, so this restricts the
+          # calculation to same-revision pods. GA since Kubernetes 1.30.
+          matchLabelKeys:
+            - pod-template-hash
         # Soft preference: also spread across nodes within a zone. Best effort,
         # so a node shortage degrades placement rather than blocking a rollout.
         - maxSkew: 1
@@ -59,6 +73,8 @@ spec:
           labelSelector:
             matchLabels:
               app.kubernetes.io/name: hivemind-greeter
+          matchLabelKeys:
+            - pod-template-hash
 
       containers:
         - name: greeter

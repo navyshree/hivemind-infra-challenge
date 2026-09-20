@@ -7,11 +7,11 @@ namespace: hivemind-greeter
 # terraform/namespace.tf) because a cluster-scoped object would force the CD
 # role up to cluster-wide permissions just to apply this kustomization.
 resources:
-  - service.yaml
-  - deployment.yaml
-  - ingress.yaml
-  - pdb.yaml
-  - hpa.yaml
+- service.yaml
+- deployment.yaml
+- ingress.yaml
+- pdb.yaml
+- hpa.yaml
 
 # Generating the ConfigMap rather than declaring it gives the object a content
 # hash suffix, and Kustomize rewrites the Deployment's reference to match. So
@@ -21,12 +21,12 @@ resources:
 # The value is read from greeter.env rather than an inline literal so CD can
 # rewrite one small file instead of editing this one.
 configMapGenerator:
-  - name: hivemind-greeter
-    envs:
-      - greeter.env
+- envs:
+  - greeter.env
+  name: hivemind-greeter
 
 # CD overrides this with the immutable, SHA-tagged ECR image:
 #   kustomize edit set image greeter=<account>.dkr.ecr.<region>.amazonaws.com/hivemind-greeter:<sha>
 images:
-  - name: greeter
-    newTag: 0.0.0-placeholder
+- name: greeter
+  newTag: 0.0.0-placeholder
