@@ -1,0 +1,68 @@
+# ---- Terraform ---------------------------------------------------------------
+.terraform/
+.terraform.tfstate.lock.info
+
+# State can contain resource attributes that are sensitive in aggregate and must
+# never reach version control. Use a remote backend for anything shared.
+*.tfstate
+*.tfstate.*
+
+*.tfplan
+*.tfplan.*
+crash.log
+crash.*.log
+
+# Variable files routinely carry account IDs, CIDRs and secrets.
+terraform.tfvars
+terraform.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+.terraformrc
+terraform.rc
+
+# NOTE: .terraform.lock.hcl is deliberately NOT ignored. Committing it pins
+# provider versions and checksums so CI and a laptop resolve identically.
+
+# ---- Go ------------------------------------------------------------------------
+/app/greeter
+greeter
+*.exe
+*.test
+*.out
+coverage.*
+
+# ---- Kubernetes ----------------------------------------------------------------
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+# ---- Secrets and credentials ----------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials
+.aws/
+
+# ---- Editors and tooling --------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---- OS -------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini
