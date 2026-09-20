@@ -253,6 +253,13 @@ Things that will bite someone who did not write this.
   no package manager, so scans fail with `UnsupportedImageError`. The flag is
   left enabled because it becomes real under Enhanced scanning; until then
   Trivy in CI is the control.
+- **GitHub issues OIDC subjects in two shapes.** Every AWS and GitHub example
+  shows `repo:owner/name:…`, but an id-qualified form —
+  `repo:owner@<id>/name@<id>:…` — also exists, and which one you get is not
+  under the workflow's control. A trust policy written from the docs fails
+  against it with nothing more informative than
+  `Not authorized to perform sts:AssumeRoleWithWebIdentity`. The policy here
+  accepts both.
 - **SNS alarm email lands in spam.** Observed, not theoretical: the
   subscription confirmation went to spam, and a confirmation nobody clicks
   leaves the subscription in `PendingConfirmation` — alarms fire, the action
@@ -307,55 +314,37 @@ is ~$10/day.
 
 ## Verified
 
-Everything here was executed. CI reproduces the static half via `make check`.
+Everything below was executed against the live stack, not asserted. `make check`
+reproduces the static half; CI runs it on every push.
 
-**Static:** 13 Go test functions / 28 cases with `-race`; `golangci-lint` (8
-linters incl. `gosec`) 0 issues; `terraform validate`, `fmt` and `tflint` clean;
-`kubeconform -strict` 9/9 against Kubernetes 1.36; `trivy` clean on Terraform,
-manifests, Dockerfile and image; `actionlint` + `shellcheck` 0 issues.
-
-**On real AWS** (`eu-central-1`, 80 resources): EKS 1.36.4 with 3 nodes one per
-AZ; all 6 addons; ALB controller 2/2 with IRSA; image pushed to ECR by SHA; ALB
-provisioned with all targets healthy; the service serving by name and by IP
-fallback with correct headers and 404s.
-
-- **Zero downtime, measured through the internet-facing ALB:** 206 requests
-  across a full three-pod replacement, **0 failures**; a second rollout after
-  the spread fix, 186 requests, **0 failures**.
-- **Autoscaling:** HPA scaled 3 → 7 under real load and back to 3.
+- **Zero downtime, through the internet-facing ALB:** 206 requests across a full
+  three-pod replacement, **0 failures**; 186 / 0 on a second rollout after the
+  spread fix.
+- **Autoscaling:** the HPA scaled 3 → 7 on real metrics under load, held the
+  zone spread at 2/2/3, and returned to 3.
 - **NetworkPolicy:** a pod in another namespace reached the service before the
-  policy and times out after it, while the ALB path is unaffected.
-- **Alerting:** four alarms live against the real load balancer; forcing one
-  into ALARM produced `Successfully executed action arn:aws:sns:…` in its
-  history, so the CloudWatch-to-SNS path is proven rather than assumed. The p99
-  alarm evaluates real traffic and sits at OK on a measured 1.2 ms.
+  policy and times out after it; the ALB path is unaffected.
+- **Alerting:** a forced alarm executed its SNS action and the mail arrived, on
+  both the ALARM and the OK transition.
+- **Pipeline:** CI green across four jobs; CD built, pushed and deployed a
+  multi-arch image over OIDC with no static key present, and a rollback to an
+  earlier tag was tested.
+- **Teardown:** deleting the Ingress released the ALB and its ENIs, which is the
+  step that makes `terraform destroy` terminate rather than hang.
 
-**Two findings that only a real deployment surfaces**, both fixed here:
+Static gates, all clean: Go tests under `-race`, `golangci-lint`,
+`terraform validate` and `tflint`, `kubeconform -strict` against 1.36, `trivy`
+over Terraform, manifests, Dockerfile and image, and `actionlint`.
 
-1. **Zone skew after rollout** — pods landed 2/1/0 across AZs despite a hard
-   spread constraint, because it counted both ReplicaSets during a surge.
-   Fixed with `matchLabelKeys`, re-verified 1/1/1.
-2. **Readiness gates are absent on a service's first deploy** — the webhook only
-   injects them once a `TargetGroupBinding` exists. Not a misconfiguration, but
-   it means the very first rollout of a new service has a weaker guarantee than
-   every one after.
+**The finding worth the space:** pods landed **2/1/0 across AZs** despite a hard
+spread constraint, because it counts both ReplicaSets during a surge rollout.
+Every placement was individually legal; the surviving set was not. Fixed with
+`matchLabelKeys`, re-verified 1/1/1. Linting and schema validation cannot see
+this — it only appears on a real multi-AZ cluster, which is the argument for
+deploying early rather than polishing locally.
 
-**The pipeline has run.** CI is green across all four jobs. CD built and pushed
-a multi-arch image, deployed it, waited on the rollout and smoke-tested through
-the ALB — authenticating by OIDC, with no static AWS key anywhere in the
-repository. CloudTrail records the deploying principal as the federated
-subject rather than a user.
-
-One thing that cost real time and is worth knowing: GitHub issues OIDC subjects
-in two shapes, and which one you get is not under the workflow's control. Every
-example in the AWS and GitHub docs shows `repo:owner/name:...`, but an
-id-qualified form — `repo:owner@<id>/name@<id>:...` — also exists, and a trust
-policy written from the docs fails against it with nothing more than
-`Not authorized to perform sts:AssumeRoleWithWebIdentity`. The policy here
-accepts both.
-
-**Not verified:** no real AZ failure was simulated — one pod per AZ is
-confirmed; surviving the loss of an AZ is inferred from that.
+**Not verified:** no AZ failure was simulated. One pod per AZ is confirmed;
+surviving the loss of an AZ is inferred from that.
 
 ### TODO
 
