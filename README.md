@@ -92,8 +92,8 @@ make destroy   # deletes the workload, waits for the ALB, then terraform destroy
 
 ### Security
 
-The container is `FROM scratch`: 2.5 MiB, one layer, no shell, no package
-manager, **0 vulnerabilities** reported by Trivy. It runs as UID 65532 with a
+The container is `FROM scratch`: under 3 MiB, one layer per architecture, no
+shell, no package manager, **0 vulnerabilities** reported by Trivy. It runs as UID 65532 with a
 read-only root filesystem, all capabilities dropped, `seccompProfile:
 RuntimeDefault` and `allowPrivilegeEscalation: false`. The namespace enforces
 the `restricted` Pod Security Standard, so a workload asking for privilege is
@@ -134,8 +134,8 @@ rather than starve its neighbours.
 
 The ALB routes to pod IPs directly (`target-type: ip`), removing the kube-proxy
 hop. The Go server sets explicit read, write and idle timeouts; Go's defaults
-are unlimited, which is a slow-client exhaustion vector. The 2.5 MiB image keeps
-pull time negligible during scale-out.
+are unlimited, which is a slow-client exhaustion vector. The sub-3 MiB image
+keeps pull time negligible during scale-out.
 
 Autoscaling was measured, not assumed: under load the HPA scaled **3 → 7
 replicas** on real `metrics-server` metrics, held the zone-spread constraint at
