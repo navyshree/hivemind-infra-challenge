@@ -15,6 +15,32 @@ locals {
     ? aws_iam_openid_connect_provider.github[0].arn
     : data.aws_iam_openid_connect_provider.github[0].arn
   ) : null
+
+  github_owner = local.github_oidc_enabled ? split("/", var.github_repository)[0] : ""
+  github_name  = local.github_oidc_enabled ? split("/", var.github_repository)[1] : ""
+
+  # GitHub issues one of two subject formats, and which one you get is not
+  # something the workflow controls:
+  #
+  #   classic  repo:owner/name:environment:production
+  #   ID-bound repo:owner@1234567/name@7654321:environment:production
+  #
+  # The second embeds the numeric owner and repository IDs so that renaming
+  # either does not silently transfer trust. Every example in the AWS and
+  # GitHub docs shows the classic form, so a policy written from them fails
+  # closed against an account issuing the ID-bound one — with a bare
+  # "Not authorized to perform sts:AssumeRoleWithWebIdentity" and nothing
+  # pointing at the subject.
+  #
+  # Both forms are allowed. The wildcard is narrower than it looks: GitHub
+  # permits neither "@" in usernames nor in repository names, so "owner@*" can
+  # only ever match that owner followed by its own numeric id.
+  github_subjects = local.github_oidc_enabled ? flatten([
+    for subject in var.github_deploy_subjects : [
+      "repo:${var.github_repository}:${subject}",
+      "repo:${local.github_owner}@*/${local.github_name}@*:${subject}",
+    ]
+  ]) : []
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
@@ -64,7 +90,16 @@ data "aws_iam_policy_document" "github_assume" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [for ref in var.github_deploy_subjects : "repo:${var.github_repository}:${ref}"]
+      values   = local.github_subjects
+    }
+
+    # Belt and braces: `repository` is an exact string with no ID suffix in
+    # either subject format, so this holds the scope even if the sub patterns
+    # above were ever loosened.
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:repository"
+      values   = [var.github_repository]
     }
   }
 }
