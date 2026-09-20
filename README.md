@@ -279,10 +279,10 @@ Rates from the AWS Price List API for `eu-central-1`, 2026-09-20.
 | EKS control plane | $0.10/hr | ~$73 |
 | NAT gateway × 3 | $0.052/hr each | ~$114 + data |
 | Application Load Balancer | $0.027/hr + LCU | ~$20 |
-| 3 × t3.medium | ~$0.048/hr each* | ~$105 |
+| 3 × t3.medium | $0.048/hr each | ~$105 |
 | **Total** | **~$0.43/hr** | **~$310** |
 
-\* EC2 rate approximate; the others are price-list verified.
+All rates verified against the AWS Pricing API for `eu-central-1`.
 
 `single_nat_gateway=true` removes ~$76/month. Spot capacity would cut compute
 substantially for a stateless workload. **Destroy between sessions** — idle, this

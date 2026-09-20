@@ -170,6 +170,27 @@ variable "enable_enhanced_scanning" {
   default     = false
 }
 
+variable "alert_email" {
+  description = <<-EOT
+    Address to send CloudWatch alarm notifications to. Empty disables alerting
+    entirely.
+
+    Apply this only AFTER the Ingress exists: the alarms bind to the load
+    balancer, which the AWS Load Balancer Controller creates in response to the
+    Ingress, not Terraform. See the header of alerting.tf.
+
+    SNS email subscriptions require the recipient to click a confirmation link
+    before anything is delivered.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alert_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
+    error_message = "alert_email must be empty or a valid email address."
+  }
+}
+
 variable "ecr_image_retention_count" {
   description = "Number of tagged images to retain in ECR before lifecycle expiry."
   type        = number
