@@ -15,9 +15,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Tool versions are pinned rather than floating. Installing from a pinned
-  # release tarball is preferred over a third-party action: fewer actions with
-  # access to the job token, and an exact, auditable version.
+  # Tool versions are pinned rather than floating, and installed from a release
+  # tarball rather than wrapped in a third-party action: fewer actions holding
+  # the job token, and an exact auditable version. The actions that remain are
+  # pinned to full commit SHAs — a tag is mutable, and one of them runs in the
+  # job that holds the OIDC token for the deploy role. Dependabot bumps both.
   GOLANGCI_LINT_VERSION: "2.13.2"
   TRIVY_VERSION: "0.74.0"
   TFLINT_VERSION: "v0.64.0"
@@ -38,9 +40,9 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: app/go.mod
           # The service has no third-party dependencies, so there is no module
@@ -107,7 +109,7 @@ jobs:
       - name: Lint
         run: golangci-lint run ./...
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: coverage
@@ -122,12 +124,12 @@ jobs:
       # Required to publish SARIF to the Security tab. Scoped to this job only.
       security-events: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./app
           push: false
@@ -156,7 +158,7 @@ jobs:
 
       - name: Upload SARIF to the Security tab
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3, codeql-bundle-v2.27.0
         with:
           sarif_file: trivy.sarif
           category: trivy-image
@@ -166,7 +168,7 @@ jobs:
         # machine-readable statement of what is actually inside it.
         run: trivy image --format cyclonedx --output sbom.cdx.json --no-progress greeter:ci
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
           path: sbom.cdx.json
@@ -222,9 +224,9 @@ jobs:
       run:
         working-directory: terraform
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: hashicorp/setup-terraform@v4
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_wrapper: false
 
@@ -279,7 +281,7 @@ jobs:
     name: Kubernetes manifests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install kubeconform
         run: |

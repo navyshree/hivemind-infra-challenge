@@ -227,7 +227,7 @@ CPU needs only `metrics-server`, which is a managed addon.
 Also deliberately out of scope, each a small change rather than a redesign: no
 WAF (one annotation plus an ACL); unrestricted node egress (needs ~a dozen VPC
 endpoints at ~$7/month each); a single environment rather than
-`overlays/{dev,staging,prod}`; actions pinned by tag rather than commit SHA;
+`overlays/{dev,staging,prod}`;
 no secrets management (the service needs none — when it does, the answer is the
 External Secrets Operator, not Kubernetes `Secret` objects in Git); and a single
 region, so an AZ failure is survived and a region failure is not.
