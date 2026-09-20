@@ -190,13 +190,19 @@ reachability alone grants nothing without an authorised IAM principal. The real
 fix is architectural — a private endpoint reached over PrivateLink from
 self-hosted runners or CodeBuild.
 
-**4. Observability stops at logs and control-plane metrics.** Structured JSON
-logs to stdout, `metrics-server` for the HPA, control plane logs in CloudWatch.
-There is no application metrics endpoint, no tracing and **no alerting**.
-Production wants RED metrics scraped by `amazon-cloudwatch-observability` or
-Prometheus, OpenTelemetry tracing, Fluent Bit shipping pod logs, and alerts on
-error rate and p99. This is the largest gap between "it runs" and "you can
-operate it at 3am".
+**4. Observability stops at the edges of the application.** Structured JSON logs
+to stdout, `metrics-server` for the HPA, control plane logs in CloudWatch, and
+CloudWatch alarms on target 5xx, unhealthy targets, p99 latency and failed
+nodes, delivered to SNS. The notification path is tested, not assumed — forcing
+an alarm produced `Successfully executed action arn:aws:sns:…`.
+
+What is missing is the inside of the service: no `/metrics` endpoint, no
+tracing, no pod log shipping. So the alarms can say it is unhealthy but not why,
+which still leaves a real gap at 3am. Production wants RED metrics scraped by
+`amazon-cloudwatch-observability` or Prometheus, OpenTelemetry tracing, and
+Fluent Bit shipping pod logs. The `failed-nodes` alarm additionally sits in
+`INSUFFICIENT_DATA` until that observability addon is installed, since nothing
+publishes `ContainerInsights` metrics without it.
 
 **5. No node autoscaling.** The node group has `max_size = 6` but nothing drives
 it. At current sizing the HPA ceiling of 12 pods fits comfortably on 3 nodes
@@ -310,6 +316,10 @@ fallback with correct headers and 404s.
 - **Autoscaling:** HPA scaled 3 → 7 under real load and back to 3.
 - **NetworkPolicy:** a pod in another namespace reached the service before the
   policy and times out after it, while the ALB path is unaffected.
+- **Alerting:** four alarms live against the real load balancer; forcing one
+  into ALARM produced `Successfully executed action arn:aws:sns:…` in its
+  history, so the CloudWatch-to-SNS path is proven rather than assumed. The p99
+  alarm evaluates real traffic and sits at OK on a measured 1.2 ms.
 
 **Two findings that only a real deployment surfaces**, both fixed here:
 
@@ -340,6 +350,8 @@ confirmed; surviving the loss of an AZ is inferred from that.
 
 ### TODO
 
+- Confirm the SNS email subscription so alarm notifications actually deliver.
+- Add an application `/metrics` endpoint and tracing.
 - Switch the registry to Enhanced scanning (`enable_enhanced_scanning = true`);
   BASIC scanning cannot read a scratch image.
 - Terminate a node, and ideally cordon an AZ, to turn the AZ-tolerance claim
