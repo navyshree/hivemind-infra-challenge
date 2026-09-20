@@ -478,18 +478,28 @@ plainly at the end.
 | `actionlint` + `shellcheck` | 0 issues |
 | ConfigMap hash rotation | confirmed: changing `HELLO_TAG` changes the hash, forcing a rollout |
 
-### Deployed to a real Kubernetes cluster
+### Deployed to a local Kubernetes cluster (kind)
 
 Schema validation only proves a manifest is well-formed, not that it runs. The
-workload was therefore deployed to a live 3-node Kubernetes 1.37 cluster whose
-nodes carry real `topology.kubernetes.io/zone` labels, using the unmodified
-`k8s/base` kustomization.
+workload was therefore deployed and exercised on a real Kubernetes control
+plane — but a local one, **not on AWS**.
+
+**Be clear about what this environment was:** a `kind` v0.33.0 cluster,
+Kubernetes v1.37.0, running as four Docker containers on a laptop — one control
+plane and three workers. The three workers were hand-labelled
+`topology.kubernetes.io/zone=eu-central-1{a,b,c}`. Those labels are synthetic:
+they give the scheduler's topology-spread constraint something real to act on,
+but they are not AWS availability zones, and all four "nodes" share one machine.
+
+So the Kubernetes control plane, scheduler, kubelet, kube-proxy and admission
+chain were genuine, and the `k8s/base` kustomization was applied unmodified.
+Nothing about AWS was exercised. The cluster was deleted afterwards.
 
 | Check | Result |
 |---|---|
 | Admission under `restricted` Pod Security | all 7 objects accepted, no violations |
 | Pods scheduled | 3/3 Running, **0 restarts** |
-| Zone spread (hard constraint) | exactly one pod per zone, across all three |
+| Zone spread (hard constraint) | exactly one pod per labelled zone, across all three |
 | Service load balancing | 60 requests distributed across all 3 backends |
 | Greeting by `?name=` | 60/60 correct |
 | `HELLO_TAG` propagation | 60/60 responses carried the tag |
@@ -502,7 +512,12 @@ nodes carry real `topology.kubernetes.io/zone` labels, using the unmodified
 
 The zero-downtime result is the meaningful one: it exercises `maxUnavailable: 0`,
 the readiness probes, the `preStop` sleep and the server's own drain together,
-which is the chain the HA claim rests on.
+which is most of the chain the HA claim rests on — the ALB readiness gate is the
+missing link, and it cannot be tested off AWS.
+
+What this does **not** establish is AZ fault tolerance. Three containers on one
+laptop with zone-shaped labels prove the scheduler honours the constraint; they
+say nothing about surviving the loss of a real availability zone.
 
 ### What is still unverified
 
