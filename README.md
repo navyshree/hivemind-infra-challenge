@@ -193,8 +193,9 @@ self-hosted runners or CodeBuild.
 **4. Observability stops at the edges of the application.** Structured JSON logs
 to stdout, `metrics-server` for the HPA, control plane logs in CloudWatch, and
 CloudWatch alarms on target 5xx, unhealthy targets, p99 latency and failed
-nodes, delivered to SNS. The notification path is tested, not assumed — forcing
-an alarm produced `Successfully executed action arn:aws:sns:…`.
+nodes, delivered to SNS. The notification path is proven end to end: a forced alarm executed its SNS
+action and the mail arrived in a real inbox, for both the ALARM and the OK
+transition.
 
 What is missing is the inside of the service: no `/metrics` endpoint, no
 tracing, no pod log shipping. So the alarms can say it is unhealthy but not why,
@@ -252,6 +253,14 @@ Things that will bite someone who did not write this.
   no package manager, so scans fail with `UnsupportedImageError`. The flag is
   left enabled because it becomes real under Enhanced scanning; until then
   Trivy in CI is the control.
+- **SNS alarm email lands in spam.** Observed, not theoretical: the
+  subscription confirmation went to spam, and a confirmation nobody clicks
+  leaves the subscription in `PendingConfirmation` — alarms fire, the action
+  succeeds, and nothing reaches a human. Allowlist
+  `no-reply@sns.amazonaws.com`, and verify with
+  `aws sns list-subscriptions-by-topic`: an ARN of `PendingConfirmation` means
+  the alerting is decorative. For anything that matters, prefer a chat webhook
+  or PagerDuty over email for exactly this reason.
 - **Node-level termination is not budgeted.** The pod drain chain fits in 40s,
   but nothing here handles a node going away underneath it. Adopting spot or
   Karpenter means adding that budget — see
@@ -350,7 +359,6 @@ confirmed; surviving the loss of an AZ is inferred from that.
 
 ### TODO
 
-- Confirm the SNS email subscription so alarm notifications actually deliver.
 - Add an application `/metrics` endpoint and tracing.
 - Switch the registry to Enhanced scanning (`enable_enhanced_scanning = true`);
   BASIC scanning cannot read a scratch image.
