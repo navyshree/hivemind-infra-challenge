@@ -321,15 +321,25 @@ fallback with correct headers and 404s.
    it means the very first rollout of a new service has a weaker guarantee than
    every one after.
 
-**Not verified:** the CI/CD workflows are written and linted but have not been
-executed end to end, so the OIDC deploy role (created by setting
-`github_repository`) has not been exercised against a live run. No real AZ
-failure was simulated — one pod per AZ is confirmed; surviving the loss of an AZ
-is inferred from that.
+**The pipeline has run.** CI is green across all four jobs. CD built and pushed
+a multi-arch image, deployed it, waited on the rollout and smoke-tested through
+the ALB — authenticating by OIDC, with no static AWS key anywhere in the
+repository. CloudTrail records the deploying principal as the federated
+subject rather than a user.
+
+One thing that cost real time and is worth knowing: GitHub issues OIDC subjects
+in two shapes, and which one you get is not under the workflow's control. Every
+example in the AWS and GitHub docs shows `repo:owner/name:...`, but an
+id-qualified form — `repo:owner@<id>/name@<id>:...` — also exists, and a trust
+policy written from the docs fails against it with nothing more than
+`Not authorized to perform sts:AssumeRoleWithWebIdentity`. The policy here
+accepts both.
+
+**Not verified:** no real AZ failure was simulated — one pod per AZ is
+confirmed; surviving the loss of an AZ is inferred from that.
 
 ### TODO
 
-- Run the pipeline end to end and attach a green CI run plus one CD deploy.
 - Switch the registry to Enhanced scanning (`enable_enhanced_scanning = true`);
   BASIC scanning cannot read a scratch image.
 - Terminate a node, and ideally cordon an AZ, to turn the AZ-tolerance claim
