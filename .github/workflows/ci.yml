@@ -27,10 +27,11 @@ env:
   # Schema version the manifests are validated against; keep in step with
   # var.kubernetes_version in terraform/variables.tf.
   KUBERNETES_VERSION: "1.36.0"
-  # Coverage floor. Deliberately modest: main() cannot be unit tested and is
-  # ~20% of statements. It is covered instead by the container smoke test in
-  # the "image" job below, which exercises startup, routing and SIGTERM drain.
-  COVERAGE_MIN: "40"
+  # Coverage floor, set just under the current figure so it catches a
+  # regression rather than merely existing. It cannot approach 100: main()
+  # is not unit testable and is a meaningful share of statements, covered
+  # instead by the container smoke test in the "image" job below.
+  COVERAGE_MIN: "70"
 
 jobs:
   app:

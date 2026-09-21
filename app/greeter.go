@@ -43,9 +43,21 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
+	// serve() rather than inlining here: os.Exit skips deferred functions, so
+	// calling it inside the body that owns the metrics server's shutdown defer
+	// would silently abandon that cleanup on the error path.
+	if err := serve(); err != nil {
+		slog.Error("server terminated unexpectedly", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("shutdown complete")
+}
+
+// serve wires up both listeners and blocks until the process is told to stop.
+func serve() error {
 	addr := net.JoinHostPort("", port())
 	slog.Info("starting Hivemind Go Greeter",
-		"hello_tag", os.Getenv("HELLO_TAG"),
+		"hello_tag", helloTag(),
 		"hostname", hostname(),
 		"addr", addr,
 	)
@@ -99,11 +111,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	if err := run(ctx, srv); err != nil {
-		slog.Error("server terminated unexpectedly", "error", err)
-		os.Exit(1)
-	}
-	slog.Info("shutdown complete")
+	return run(ctx, srv)
 }
 
 // run serves until ctx is cancelled, then drains in-flight requests.
@@ -150,7 +158,7 @@ func HelloServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg := fmt.Sprintf("Hello, %s! I'm %s", greetee, hostname())
-	if tag := os.Getenv("HELLO_TAG"); tag != "" {
+	if tag := helloTag(); tag != "" {
 		msg = fmt.Sprintf("%s (tag: %s)", msg, tag)
 	}
 
