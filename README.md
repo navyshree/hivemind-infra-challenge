@@ -185,6 +185,17 @@ zone-spread constraint is `DoNotSchedule`, so displaced pods would stay Pending
 rather than move. Installing the agent without the config is a common trap: EKS
 sees the faults and does nothing.
 
+**Recovery.** The service is stateless — no database, no volumes, no
+StatefulSets — so there is nothing to back up and RPO is not a meaningful
+number. Losing the region means rebuilding from this repository:
+`terraform apply -var region=<other>`, then one CD run. Region, availability
+zones and AMIs are all derived rather than hardcoded, so that is a variable
+change rather than a rewrite, bounded by EKS control-plane creation at roughly
+20 minutes. Two things make it slower than that sounds: ECR is not replicated,
+so the image is rebuilt from source, and with no domain the replacement load
+balancer answers on a different hostname that has to be handed out by hand.
+**This is a plan, not a rehearsal — it has never been executed.**
+
 ---
 
 ## Tradeoffs
@@ -214,8 +225,10 @@ with locking or two concurrent applies corrupt state. The S3 backend block with
 S3-native locking is written and commented in
 [`versions.tf`](terraform/versions.tf). It is off because the bucket cannot live
 in the state that stores it — a bootstrap step that is ceremony for a
-single-operator review environment. **This becomes the top priority the moment a
-second person touches it.**
+single-operator review environment. That file is also the only record of what
+exists: lose it and the running stack can only be dismantled by hand in the
+console. **This becomes the top priority the moment a second person touches it,
+or the environment outlives a laptop.**
 
 **3. The Kubernetes API endpoint is public.** `0.0.0.0/0`, because
 GitHub-hosted runners egress from a large rotating range and a reviewer connects
