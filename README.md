@@ -409,7 +409,7 @@ surviving the loss of an AZ is inferred from that.
 
 ### TODO
 
-- Add an application `/metrics` endpoint and tracing.
+- Deploy a collector to scrape the `/metrics` endpoint, and add tracing.
 - Switch the registry to Enhanced scanning (`enable_enhanced_scanning = true`);
   BASIC scanning cannot read a scratch image.
 - Terminate a node, and ideally cordon an AZ, to turn the AZ-tolerance claim
