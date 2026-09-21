@@ -210,20 +210,23 @@ reachability alone grants nothing without an authorised IAM principal. The real
 fix is architectural — a private endpoint reached over PrivateLink from
 self-hosted runners or CodeBuild.
 
-**4. Observability stops at the edges of the application.** Structured JSON logs
-to stdout, `metrics-server` for the HPA, control plane logs in CloudWatch, and
-CloudWatch alarms on target 5xx, unhealthy targets, p99 latency and failed
-nodes, delivered to SNS. The notification path is proven end to end: a forced alarm executed its SNS
-action and the mail arrived in a real inbox, for both the ALARM and the OK
-transition.
+**4. Metrics are exposed but nothing collects them.** Structured JSON logs to
+stdout, `metrics-server` for the HPA, control plane logs in CloudWatch, and
+CloudWatch alarms on target 5xx, unhealthy targets, p99 latency and node
+capacity, delivered to SNS. The notification path is proven end to end: a forced
+alarm executed its SNS action and the mail arrived in a real inbox, for both the
+ALARM and the OK transition.
 
-What is missing is the inside of the service: no `/metrics` endpoint, no
-tracing, no pod log shipping. So the alarms can say it is unhealthy but not why,
-which still leaves a real gap at 3am. Production wants RED metrics scraped by
-`amazon-cloudwatch-observability` or Prometheus, OpenTelemetry tracing, and
-Fluent Bit shipping pod logs. The `failed-nodes` alarm additionally sits in
-`INSUFFICIENT_DATA` until that observability addon is installed, since nothing
-publishes `ContainerInsights` metrics without it.
+The service also exposes RED metrics in Prometheus format on port 9090 —
+request counts by status, a latency histogram, build info and uptime — on a
+separate port so `/metrics` is never reachable through the load balancer, and
+the NetworkPolicy already admits a scraper.
+
+What is still missing is everything that reads them. No Prometheus or
+`amazon-cloudwatch-observability` collector is deployed, so the counters exist
+but nobody is looking; there is no tracing and no pod log shipping. The alarms
+can therefore say the service is unhealthy but not why, which remains the real
+gap at 3am.
 
 **5. No node autoscaling.** The node group has `max_size = 6` but nothing drives
 it. At current sizing the HPA ceiling of 12 pods fits comfortably on 3 nodes
