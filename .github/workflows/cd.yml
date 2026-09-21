@@ -130,14 +130,37 @@ jobs:
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --region "${{ vars.AWS_REGION }}" --name "${{ vars.EKS_CLUSTER_NAME }}"
 
-      - name: Set image and release tag
-        working-directory: k8s/base
+      - name: Render manifests
+        env:
+          CERT_ARN: ${{ vars.ACM_CERTIFICATE_ARN }}
         run: |
+          set -euo pipefail
+
+          cd k8s/base
           kustomize edit set image "greeter=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}"
           # Rewriting this file changes the generated ConfigMap's hash, which
           # changes the pod spec, which is what actually forces a rollout.
           echo "HELLO_TAG=${{ steps.tag.outputs.tag }}" > greeter.env
-          kustomize build . | tee /tmp/to-apply.yaml | head -40
+          cd ../..
+
+          # Deploy the TLS overlay when a certificate is configured, the base
+          # otherwise. This branch exists because deploying the base
+          # unconditionally silently reverts TLS: the overlay is the only thing
+          # carrying the 443 listener, so the controller tears it down on the
+          # next deploy and HTTPS starts hanging on the TCP handshake with no
+          # error anywhere. Observed exactly that before this was added.
+          if [ -n "${CERT_ARN}" ]; then
+            echo "certificate configured — rendering the TLS overlay"
+            kustomize build k8s/overlays/tls | sed "s|REPLACE-ME|${CERT_ARN}|" > /tmp/to-apply.yaml
+            if grep -q 'REPLACE-ME' /tmp/to-apply.yaml; then
+              echo "::error::certificate ARN placeholder was not substituted"
+              exit 1
+            fi
+          else
+            echo "no ACM_CERTIFICATE_ARN set — rendering the base (HTTP only)"
+            kustomize build k8s/base > /tmp/to-apply.yaml
+          fi
+          head -40 /tmp/to-apply.yaml
 
       - name: Apply
         run: kubectl apply -f /tmp/to-apply.yaml
