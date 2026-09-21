@@ -26,15 +26,15 @@ metadata:
 
     alb.ingress.kubernetes.io/tags: Project=hivemind-greeter,ManagedBy=kubernetes
 
-    # ---- TLS: not enabled here, and deliberately so -------------------------
-    # HTTPS needs a domain and an ACM certificate, neither of which this
-    # exercise provisions. See README "Tradeoffs". With a certificate the
-    # annotations become:
+    # ---- TLS lives in the overlay, not here ---------------------------------
+    # The base stays HTTP-only so it is deployable with no certificate at all.
+    # HTTPS is added by k8s/overlays/tls, which CD renders whenever
+    # ACM_CERTIFICATE_ARN is set.
     #
-    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:<region>:<account>:certificate/<id>
-    # alb.ingress.kubernetes.io/ssl-redirect: "443"
-    # alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    # Applying this base to a cluster that currently has the overlay REMOVES the
+    # 443 listener, and the controller then closes 443 in the security group —
+    # HTTPS begins hanging on the TCP handshake with no error logged anywhere.
+    # That is not hypothetical; it happened before CD learned to branch.
 spec:
   ingressClassName: alb
   rules:

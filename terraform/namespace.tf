@@ -1,8 +1,8 @@
 provider "kubernetes" {
-  # Note the shape differs from the helm provider above: here the connection
-  # fields are top-level attributes and `exec` is a nested block, whereas the
-  # helm v3 provider takes a single `kubernetes = { ... }` attribute with `exec`
-  # as a nested object. They are not interchangeable.
+  # Note the shape differs from the helm provider in alb_controller.tf: here
+  # the connection fields are top-level attributes and `exec` is a nested
+  # block, whereas the helm v3 provider takes a single `kubernetes = { ... }`
+  # attribute with `exec` as a nested object. They are not interchangeable.
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
 

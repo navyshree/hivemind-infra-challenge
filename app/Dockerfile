@@ -34,6 +34,9 @@ COPY --from=build /out/greeter /greeter
 # and Kubernetes runAsNonRoot can only verify a numeric user.
 USER 65532:65532
 
-EXPOSE 8080
+# Documentation only — EXPOSE publishes nothing by itself, and Kubernetes reads
+# containerPort from the pod spec rather than the image. Both are listed so
+# `docker inspect` tells the truth about what the process binds.
+EXPOSE 8080 9090
 
 ENTRYPOINT ["/greeter"]

@@ -20,7 +20,7 @@ resource "aws_ecr_repository" "greeter" {
   # It is kept true because it becomes meaningful the moment the registry is
   # switched to ENHANCED scanning (Amazon Inspector), which does read
   # language-level dependencies including Go binaries. See
-  # var.enable_enhanced_scanning below.
+  # var.enable_enhanced_scanning in variables.tf.
   #
   # Until then the real control is Trivy, which scans the Go binary's embedded
   # module list and gates CI on HIGH/CRITICAL. The gap Trivy cannot cover is

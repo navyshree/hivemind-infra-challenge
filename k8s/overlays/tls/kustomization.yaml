@@ -1,18 +1,23 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# TLS overlay.
+# TLS overlay — adds an HTTPS listener to the base.
 #
-# The base serves HTTP only because this deployment owns no domain and so has
-# no ACM certificate to attach — see README "Tradeoffs". Rather than leave that
-# as a paragraph explaining what we would have done, the configuration exists
-# and is validated in CI; it needs one real certificate ARN to become live:
+# The base is HTTP-only so it stays deployable without a certificate. This
+# overlay is what CD actually renders whenever ACM_CERTIFICATE_ARN is set; the
+# ARN is substituted at apply time because it embeds the AWS account id and so
+# does not belong in a committed file:
 #
-#   1. Issue or import a certificate in ACM in the cluster's region.
-#   2. Put its ARN in ingress-tls.yaml.
-#   3. kubectl apply -k k8s/overlays/tls
+#   ARN=$(scripts/tls-selfsigned.sh)        # or a public ACM certificate
+#   kubectl kustomize k8s/overlays/tls | sed "s|REPLACE-ME|${ARN}|" | kubectl apply -f -
 #
-# Point the domain's DNS at the ALB hostname and the redirect does the rest.
+# Applying the base instead of this overlay REMOVES the 443 listener, and the
+# controller then closes 443 in the security group — so HTTPS starts hanging on
+# the TCP handshake with no error anywhere. CD branches on the variable for
+# exactly that reason.
+#
+# There is deliberately no ssl-redirect while the certificate is self-signed;
+# see ingress-tls.yaml.
 
 resources:
   - ../../base

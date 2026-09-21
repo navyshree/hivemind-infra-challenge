@@ -6,13 +6,17 @@ metadata:
   labels:
     app.kubernetes.io/name: hivemind-greeter
 spec:
-  # ClusterIP, not LoadBalancer: the ALB is provisioned by the Ingress below,
+  # ClusterIP, not LoadBalancer: the ALB is provisioned from ingress.yaml,
   # which supports HTTP routing, WAF and ACM. A Service of type LoadBalancer
   # would create a second, redundant layer-4 balancer.
   type: ClusterIP
   selector:
     app.kubernetes.io/name: hivemind-greeter
   ports:
+    # Only the application port. The metrics port is deliberately absent: the
+    # pod carries prometheus.io/* annotations so a scraper targets pod IPs
+    # directly, and putting 9090 behind a ClusterIP would load-balance scrapes
+    # across replicas, yielding one pod's counters at random.
     - name: http
       port: 80
       targetPort: http
