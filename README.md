@@ -63,9 +63,26 @@ make url                                              # prints the public URL
 Useful variables: `region`, `kubernetes_version` (keep it in **standard**
 support — extended support bills at $0.60/cluster-hour instead of $0.10),
 `single_nat_gateway=true` to save ~$76/month at the cost of AZ-independent
-egress, and `github_repository=owner/repo` to create the OIDC deploy role. The
-full set, with the reasoning behind each default, is in
+egress, `github_repository=owner/repo` to create the OIDC deploy role, and
+`alert_email` to wire up the CloudWatch alarms. The full set, with the
+reasoning behind each default, is in
 [`terraform/variables.tf`](terraform/variables.tf).
+
+The last two gate their resources on a non-empty value, so pass them on every
+run once you have used them — a later `plan` without them is not drift, it is
+Terraform correctly proposing to destroy what those variables switch on. Put
+them in `terraform.tfvars` (gitignored) rather than retyping them.
+
+For HTTPS, apply the TLS overlay instead of `k8s/base` — the base has no 443
+listener, so applying it to a cluster that has one takes HTTPS away:
+
+```shell
+ARN=$(scripts/tls-selfsigned.sh)     # or an ACM certificate you already own
+kubectl kustomize k8s/overlays/tls | sed "s|REPLACE-ME|${ARN}|" | kubectl apply -f -
+```
+
+See [Tradeoffs](#tradeoffs) for what a self-signed certificate does and does
+not buy you.
 
 ### Using it
 
@@ -365,7 +382,11 @@ reproduces the static half; CI runs it on every push.
   step that makes `terraform destroy` terminate rather than hang.
 - **TLS:** the ALB negotiates `TLSv1.3 / AEAD-AES128-GCM-SHA256` and serves the
   application over it; port 80 still answers 200, so no visitor is pushed into
-  a certificate warning.
+  a certificate warning. It also survived a subsequent full CD run, which is the
+  real test — an earlier deploy had silently removed the listener.
+- **Metrics:** counters move by status class and the histogram's `+Inf` bucket
+  equals the observation count, checked against a running container; `/metrics`
+  correctly 404s on the application port, so it is not reachable through the ALB.
 
 Static gates, all clean: Go tests under `-race` with a coverage floor,
 `golangci-lint`, `govulncheck`, `terraform validate` / `test` / `tflint`,
