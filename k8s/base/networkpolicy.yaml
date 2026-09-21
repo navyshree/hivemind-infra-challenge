@@ -58,6 +58,16 @@ spec:
         - protocol: TCP
           port: 8080
 
+    # Metrics are scrapable from inside the cluster only. Deliberately NOT the
+    # public subnet ranges above: the load balancer has no business reading
+    # them, and exposing an unauthenticated metrics endpoint to the internet
+    # leaks request volumes, latency and the deployed release tag.
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 9090
+
   egress:
     # DNS only. The greeter makes no outbound calls of its own; this exists so
     # that cluster DNS resolution keeps working for anything the runtime does

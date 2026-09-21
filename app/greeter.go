@@ -24,6 +24,10 @@ import (
 const (
 	defaultPort = "8080"
 
+	// Deliberately not 8080: the Ingress routes only to the application port,
+	// so metrics are unreachable from the internet by construction.
+	defaultMetricsPort = "9090"
+
 	// maxNameLength bounds the greeting parameter so a caller cannot use it to
 	// drive large allocations or flood the logs.
 	maxNameLength = 64
@@ -51,9 +55,39 @@ func main() {
 	mux.HandleFunc("/healthz", HealthServer)
 	mux.HandleFunc("/readyz", HealthServer)
 
+	// Metrics live on their own port and their own server. Keeping them off the
+	// application port means the Ingress cannot expose them however the routing
+	// is later changed — the ALB only ever knows about 8080.
+	m := newMetrics(time.Now())
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", m)
+
+	metricsSrv := &http.Server{
+		Addr:              net.JoinHostPort("", metricsPort()),
+		Handler:           metricsMux,
+		ReadHeaderTimeout: readTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
+
+	go func() {
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			// Losing metrics must not take the service down with it.
+			slog.Error("metrics server stopped", "error", err)
+		}
+	}()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("metrics server did not shut down cleanly", "error", err)
+		}
+	}()
+
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: instrument(m, mux),
 		// Go's default server applies no timeouts at all, which leaves it open
 		// to slow-client resource exhaustion. These are deliberately modest.
 		ReadHeaderTimeout: readTimeout,
@@ -209,6 +243,19 @@ func port() string {
 		return p
 	}
 	return defaultPort
+}
+
+func metricsPort() string {
+	if p := os.Getenv("METRICS_PORT"); p != "" {
+		return p
+	}
+	return defaultMetricsPort
+}
+
+// helloTag is the deployed release, reported in the greeting and as a
+// build_info label so a scrape can be attributed to an exact image.
+func helloTag() string {
+	return os.Getenv("HELLO_TAG")
 }
 
 // hostname reports the pod name under Kubernetes, which is what makes the

@@ -24,6 +24,14 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: hivemind-greeter
+      annotations:
+        # The de facto convention most scrapers auto-discover on. Nothing in
+        # this cluster scrapes yet — see the README — but the port is correct
+        # and labelled, so wiring a collector is configuration rather than a
+        # code change.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
     spec:
       serviceAccountName: hivemind-greeter
       # The service makes no Kubernetes API calls, so it has no use for a
@@ -88,6 +96,12 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+              protocol: TCP
+            # Separate port, deliberately. The Ingress routes only to `http`,
+            # so metrics cannot be reached from the internet however the
+            # routing is later edited.
+            - name: metrics
+              containerPort: 9090
               protocol: TCP
 
           env:
