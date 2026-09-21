@@ -81,9 +81,6 @@ ARN=$(scripts/tls-selfsigned.sh)     # or an ACM certificate you already own
 kubectl kustomize k8s/overlays/tls | sed "s|REPLACE-ME|${ARN}|" | kubectl apply -f -
 ```
 
-See [Tradeoffs](#tradeoffs) for what a self-signed certificate does and does
-not buy you.
-
 ### Using it
 
 ```shell
@@ -234,16 +231,12 @@ capacity, delivered to SNS. The notification path is proven end to end: a forced
 alarm executed its SNS action and the mail arrived in a real inbox, for both the
 ALARM and the OK transition.
 
-The service also exposes RED metrics in Prometheus format on port 9090 —
-request counts by status, a latency histogram, build info and uptime — on a
-separate port so `/metrics` is never reachable through the load balancer, and
-the NetworkPolicy already admits a scraper.
-
-What is still missing is everything that reads them. No Prometheus or
-`amazon-cloudwatch-observability` collector is deployed, so the counters exist
-but nobody is looking; there is no tracing and no pod log shipping. The alarms
-can therefore say the service is unhealthy but not why, which remains the real
-gap at 3am.
+RED metrics are exposed in Prometheus format on port 9090 — counts by status, a
+latency histogram, build info, uptime — on a separate port so `/metrics` is
+unreachable through the load balancer, with the NetworkPolicy already admitting
+a scraper. What is missing is everything that reads them: no collector, no
+tracing, no pod log shipping. The alarms can say the service is unhealthy but
+not why, which remains the real gap at 3am.
 
 **5. No node autoscaling.** The node group has `max_size = 6` but nothing drives
 it. At current sizing the HPA ceiling of 12 pods fits comfortably on 3 nodes
@@ -382,11 +375,9 @@ reproduces the static half; CI runs it on every push.
   step that makes `terraform destroy` terminate rather than hang.
 - **TLS:** the ALB negotiates `TLSv1.3 / AEAD-AES128-GCM-SHA256` and serves the
   application over it; port 80 still answers 200, so no visitor is pushed into
-  a certificate warning. It also survived a subsequent full CD run, which is the
-  real test — an earlier deploy had silently removed the listener.
+  a certificate warning, and it survives a full CD run.
 - **Metrics:** counters move by status class and the histogram's `+Inf` bucket
-  equals the observation count, checked against a running container; `/metrics`
-  correctly 404s on the application port, so it is not reachable through the ALB.
+  equals the observation count, checked against a running container.
 
 Static gates, all clean: Go tests under `-race` with a coverage floor,
 `golangci-lint`, `govulncheck`, `terraform validate` / `test` / `tflint`,
